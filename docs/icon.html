@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+ html,body{margin:0;width:180px;height:180px;overflow:hidden;background:transparent}
+ #tile{position:relative;width:180px;height:180px;border-radius:40px;overflow:hidden;
+   background:radial-gradient(120% 120% at 30% 22%,#2a2d4a 0%,#1b1d28 55%,#151722 100%);
+   display:flex;align-items:center;justify-content:center}
+ #slot{width:180px;height:180px;display:flex;align-items:center;justify-content:center}
+</style></head><body>
+<div id="tile"><div id="slot"></div></div>
+<script>
+window.__GROK_BUDDY_DEMO__ = { now: Date.now(), sessions: [{ id: 'ic', phase: 'thinking', detail: '' }] };
+const realFetch = window.fetch;
+window.fetch = function (url, opts) {
+  if (String(url).indexOf('/dsh-grok-buddy/state.json') !== -1) {
+    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  return realFetch.call(this, url, opts);
+};
+const row = document.createElement('div');
+row.setAttribute('data-row-key', 'session:ic');
+const slot = document.createElement('span');
+slot.className = 'slot';
+slot.style.cssText = 'width:180px;height:180px;display:flex;align-items:center;justify-content:center';
+row.appendChild(slot);
+document.getElementById('slot').appendChild(row);
+
+const s = document.createElement('script');
+s.src = '../lib/widget.js';
+document.head.appendChild(s);
+
+const SIZE = 146;
+setInterval(function () {
+  document.querySelectorAll('svg.dsgb-bot').forEach(function (svg) {
+    svg.setAttribute('width', String(SIZE));
+    svg.setAttribute('height', String(SIZE));
+    // widget 的样式把 .dsgb-bot 锁在 18px，这里用内联 !important 放大到图标尺寸
+    svg.style.setProperty('width', SIZE + 'px', 'important');
+    svg.style.setProperty('height', SIZE + 'px', 'important');
+  });
+}, 50);
+</script></body></html>

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./assets/icon-180.png" width="88" alt="dsh-grok-buddy icon">
+
 <img src="./docs/hero.png" alt="dsh-grok-buddy — DSH 侧栏会话列表：左边是默认圆点，右边是 Grok Bot 的脸" style="max-width: 860px; width: 100%">
 
 # dsh-grok-buddy
