@@ -51,9 +51,13 @@ const modules = [
 ]
 
 let body = ''
+// 横幅里的路径一律用正斜杠：path.relative 在 Windows 上给反斜杠，
+// 那会让同一份源码在三个平台构建出不同的字节，CI 的「产物已同步」检查就红。
+const relPosix = (file) => path.relative(ROOT, file).split(path.sep).join('/')
+
 for (const file of modules) {
   const { code } = load(file)
-  body += '\n/* ── ' + path.relative(ROOT, file) + ' ───────────────────────────── */\n'
+  body += '\n/* ── ' + relPosix(file) + ' ───────────────────────────── */\n'
   body += code.trim() + '\n'
 }
 
