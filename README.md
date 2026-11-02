@@ -14,7 +14,7 @@
 <img src="./docs/effect.gif" alt="dsh-grok-buddy 实际效果：侧栏会话行里的 GrokBot 头像在眨眼、转动眼珠" style="max-width: 560px; width: 100%">
 
 [![DSH Plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4f7cff)](https://github.com/topics/dsh-plugin)
-[![npm](https://img.shields.io/npm/v/dsh-grok-buddy)](https://www.npmjs.com/package/dsh-grok-buddy)
+[![release](https://img.shields.io/github/v/release/devzer0o0/dsh-grok-buddy)](https://github.com/devzer0o0/dsh-grok-buddy/releases)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](./LICENSE)
 
 </div>
@@ -65,12 +65,13 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 
 ```text
 安装 dsh-grok-buddy 插件到我的 DSH profile（没说的话先问我用哪个 profile）。
-npm 包名是 `dsh-grok-buddy`。
+装的是 GitHub 上的 `devzer0o0/dsh-grok-buddy`（尚未发布到 npm）。
 
 步骤：
-1. 加依赖：`dsh plugin --profile <PROFILE> add dsh-grok-buddy`
+1. 加依赖：`dsh plugin --profile <PROFILE> add github:devzer0o0/dsh-grok-buddy`
+   （它还没发布到 npm，所以装 GitHub 源；Release 上有预构建 tarball 也行）
 2. 确认 node_modules/dsh-grok-buddy 里有构建产物 lib/index.js 和 lib/widget.js；
-   缺了就在插件目录跑一次 `npm run build` 再重新加。
+   缺了就在插件目录跑一次 `npm run build`，再重新装。
 3. 确认 profile 的 package.json 里 dsh.profile.bundles 包含 `dsh-grok-buddy` ——
    本包自带 cordis.patch.yml，只要在 bundles 列表里，启动时那一行会自动插进配置树。
 4. 不要启动 profile，装完验证即可，然后告诉我你改了什么。
@@ -79,7 +80,7 @@ npm 包名是 `dsh-grok-buddy`。
 然后重启 `dsh web`（或让 HMR 生效）并刷新页面。
 
 也可以从 [dsh-market](https://dshmarket.com) 插件市场里搜索 `dsh-grok-buddy` 一键安装 ——
-本包发布在 npm，市场会从 npm registry 直接索引到它。
+预构建 tarball 挂在 GitHub Release 上，市场会优先用它，跳过源码构建。
 
 想从源码装：
 
