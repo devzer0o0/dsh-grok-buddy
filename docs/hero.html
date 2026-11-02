@@ -1,0 +1,147 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>dsh-grok-buddy · hero</title>
+<style>
+ *{box-sizing:border-box}
+ body{margin:0;padding:34px 38px 30px;background:#0e1013;color:#e8e8ea;
+      font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;
+      -webkit-font-smoothing:antialiased}
+ .cap{font-size:13px;color:#8b93a1;margin:0 0 20px}
+ .cap b{color:#c9cdd6;font-weight:600}
+ .panes{display:flex;gap:26px;align-items:flex-start}
+ .pane{width:300px;background:#17191e;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px;flex:none}
+ .head{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px}
+ .head .t{font-size:13px;font-weight:600;color:#d8dbe2;letter-spacing:.01em}
+ .head .pill{font-size:10px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.06);color:#8b93a1}
+ .row{display:flex;align-items:center;height:34px;padding:0 8px;border-radius:8px;gap:6px}
+ .row.on{background:rgba(127,127,127,.13)}
+ .slot{width:18px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+ .dot{width:8px;height:8px;border-radius:50%;display:block}
+ .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:#dfe3ea}
+ .tag{font-size:9.5px;color:#6b7280;font-family:ui-monospace,Menlo,monospace;flex:none}
+ .lab{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;
+      margin:0 0 8px 4px;font-weight:600}
+ .after .lab{color:#7c8cff}
+ .col{display:flex;flex-direction:column}
+ .side{flex:1;padding-top:2px;display:flex;flex-direction:column;gap:12px;min-width:230px}
+ .note{font-size:12px;line-height:1.65;color:#98a0ae}
+ .note b{color:#dfe3ea;font-weight:600}
+ .kbd{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:rgba(255,255,255,.06);
+      padding:1px 5px;border-radius:4px;color:#c9cdd6}
+ .legend{display:flex;flex-wrap:wrap;gap:5px 14px;margin-top:14px}
+ .lg{display:flex;align-items:center;gap:5px;font-size:11px;color:#9aa2b0}
+ .lg .dot{width:6px;height:6px}
+</style></head><body>
+<p class="cap">同一份会话列表 —— <b>左边是 DSH 默认的彩色小圆点</b>，<b>右边是装上 dsh-grok-buddy 之后</b>。头像是 Grok Bot 本人的那张脸，状态直接画在脸上。</p>
+
+<div class="panes">
+  <div class="col">
+    <div class="lab">默认 · 圆点</div>
+    <div class="pane" id="before">
+      <div class="head"><span class="t">会话</span><span class="pill">7</span></div>
+    </div>
+  </div>
+
+  <div class="col after">
+    <div class="lab">装上 dsh-grok-buddy</div>
+    <div class="pane" id="after">
+      <div class="head"><span class="t">会话</span><span class="pill">7</span></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <p class="note">每只脸就是一个状态：<b>紫色在思考</b>、<b>蓝色在输出</b>、<b>橙色在等你点确认</b>、<b>红色是失败了</b>。</p>
+    <p class="note">鼠标悬停会显示细节，比如正在跑哪个工具、失败代号、重试第几次。</p>
+    <p class="note">不新增任何 UI 元素 —— 只是把原来那个圆点换成一面会动的脸，位置和 1:1 尺寸都没变。</p>
+    <div class="legend" id="legend"></div>
+  </div>
+</div>
+
+<script>
+window.__GROK_BUDDY_DEMO__ = {
+  now: Date.now(),
+  sessions: [
+    { id: 'a1', phase: 'thinking',  detail: 'step 2' },
+    { id: 'a2', phase: 'tool',      detail: 'bash' },
+    { id: 'a3', phase: 'waiting',   detail: 'write' },
+    { id: 'a4', phase: 'streaming', detail: '' },
+    { id: 'a5', phase: 'completed', detail: '' },
+    { id: 'a6', phase: 'retry',     detail: 'RATE_LIMIT / 2' },
+    { id: 'a7', phase: 'error',     detail: 'QUOTA' }
+  ]
+};
+const realFetch = window.fetch;
+window.fetch = function (url, opts) {
+  if (String(url).indexOf('/dsh-grok-buddy/state.json') !== -1) {
+    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  return realFetch.call(this, url, opts);
+};
+
+const ROWS = [
+  ['a1', '插件适配 dsh',    '#a855f7', '思考'],
+  ['a2', '修复 BiliSail',   '#14b8a6', '工具'],
+  ['a3', 'PiliPlus 编译',   '#f97316', '待确认'],
+  ['a4', '写发布说明',      '#3b82f6', '输出'],
+  ['a5', '资源占用排查',     '#10b981', '完成'],
+  ['a6', '重构 derive.js',  '#f59e0b', '重试'],
+  ['a7', '迁移到 pnpm',     '#ef4444', '失败']
+];
+
+function makeRow(id, title) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.setAttribute('data-row-key', 'session:' + id);
+  const slot = document.createElement('span');
+  slot.className = 'slot';
+  row.appendChild(slot);
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = title;
+  row.appendChild(name);
+  return { row: row, slot: slot };
+}
+
+const before = document.getElementById('before');
+const after = document.getElementById('after');
+for (const r of ROWS) {
+  const b = makeRow(r[0], r[1]);
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.setAttribute('data-state', 'idle');
+  dot.style.background = r[2];
+  b.slot.appendChild(dot);
+  before.appendChild(b.row);
+  after.appendChild(makeRow(r[0], r[1]).row);
+}
+document.querySelector('#after .row').classList.add('on');
+
+// widget 通过轮询接管 #after 里每一行的状态位
+const s = document.createElement('script');
+s.src = '../lib/widget.js';
+document.head.appendChild(s);
+
+// 让头像保持 18px（侧栏真实尺寸），并留一点呼吸空间
+setInterval(function () {
+  document.querySelectorAll('svg.dsgb-bot').forEach(function (svg) {
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+  });
+}, 90);
+
+// 图例：小圆点对应相位
+const legend = document.getElementById('legend');
+const LG = [['#a855f7','思考'],['#3b82f6','输出'],['#14b8a6','工具'],['#f97316','等你'],
+            ['#f59e0b','重试'],['#ef4444','失败'],['#10b981','完成'],['#9ca3af','安静']];
+for (const g of LG) {
+  const el = document.createElement('span');
+  el.className = 'lg';
+  const d = document.createElement('span');
+  d.className = 'dot';
+  d.style.background = g[0];
+  el.appendChild(d);
+  el.appendChild(document.createTextNode(g[1]));
+  legend.appendChild(el);
+}
+</script>
+</body></html>

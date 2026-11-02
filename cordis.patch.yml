@@ -1,0 +1,9 @@
+# dsh-grok-buddy —— 侧栏会话状态头像
+# 宿主半侧监听 session/event、agent/assistant-stream、agent/status、agent/error，
+# 折成每个会话一个「相位」，通过 /dsh-grok-buddy/state.json 下发；
+# 页面脚本由 /dsh-grok-buddy/widget.js 提供，经 webserver/index-inject 注入，
+# 并在每一行会话的 16px 状态位里画一只 GrokBot 头像。
+- insert:
+    - id: dsh-grok-buddy
+      name: dsh-grok-buddy
+      config: {}

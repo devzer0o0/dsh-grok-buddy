@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>dsh-grok-buddy · GrokBot 状态头像</title>
+<style>
+ :root{--bg:#131417;--panel:#1b1d22;--line:rgba(255,255,255,.07);--text:#e8e8ea;--muted:#8b93a1}
+ *{box-sizing:border-box}
+ body{margin:0;padding:26px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang SC",sans-serif}
+ h1{font-size:19px;margin:0 0 4px}
+ .sub{color:var(--muted);font-size:13px;margin:0 0 22px;max-width:780px}
+ h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:26px 0 10px;font-weight:600}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+ .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
+ .name{font-size:12.5px;font-weight:600}
+ .key{font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+ .rows{display:flex;flex-direction:column;gap:1px;max-width:340px}
+ .demo-row{display:flex;align-items:center;height:32px;padding:0 8px;border-radius:8px;font-size:14px;cursor:default}
+ .demo-row:hover{background:rgba(127,127,127,.14)}
+ .t{margin:0 6px 0 4px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .tm{color:var(--muted);font-size:10px;flex:none}
+ .slot{width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+</style></head><body>
+<h1>dsh-grok-buddy · GrokBot 状态头像</h1>
+<p class="sub">头像按官方 GrokBot 几何重建：眼睛是贴在球面上的多边形，转头时会透视变形、转到背面消失；表情切换是弹簧形变，还带随机眨眼。状态直接画在头像上，对应官方 lifecycle（Idle / Working / Waiting / Blocked / Thinking / Done）。</p>
+<h2>八种状态</h2>
+<div class="grid" id="big"></div>
+<h2>1:1 · 侧栏实际大小</h2>
+<div class="grid" id="small"></div>
+<h2>放进会话列表</h2>
+<div class="rows" id="rows"></div>
+
+<script>
+window.__GROK_BUDDY_DEMO__ = {
+  now: Date.now(),
+  sessions: [
+    { id: 'd0', phase: 'idle', detail: '' },
+    { id: 'd1', phase: 'thinking', detail: 'step 2' },
+    { id: 'd2', phase: 'streaming', detail: '' },
+    { id: 'd3', phase: 'tool', detail: 'bash' },
+    { id: 'd4', phase: 'waiting', detail: 'write' },
+    { id: 'd5', phase: 'retry', detail: 'RATE_LIMIT / 2' },
+    { id: 'd6', phase: 'error', detail: 'QUOTA' },
+    { id: 'd7', phase: 'completed', detail: '' }
+  ]
+};
+const realFetch = window.fetch;
+window.fetch = function (url, opts) {
+  if (String(url).indexOf('/dsh-grok-buddy/state.json') !== -1) {
+    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  return realFetch.call(this, url, opts);
+};
+</script>
+<script src="./lib/widget.js"></script>
+<script>
+(function () {
+  const MAP = [
+    ['安静', 'idle', 'd0'], ['思考中', 'thinking', 'd1'], ['输出中', 'streaming', 'd2'], ['执行工具', 'tool', 'd3'],
+    ['等你确认', 'waiting', 'd4'], ['重试中', 'retry', 'd5'], ['失败', 'error', 'd6'], ['刚完成', 'completed', 'd7']
+  ];
+  function rowFor(id, title, meta) {
+    const row = document.createElement('div');
+    row.className = 'demo-row';
+    row.setAttribute('data-row-key', 'session:' + id);
+    const slot = document.createElement('span');
+    slot.className = 'slot';
+    const dot = document.createElement('span');
+    dot.setAttribute('data-state', 'idle');
+    dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#555';
+    slot.appendChild(dot);
+    row.appendChild(slot);
+    if (title !== '') {
+      const t = document.createElement('span'); t.className = 't'; t.textContent = title;
+      const tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = meta;
+      row.appendChild(t); row.appendChild(tm);
+    }
+    return row;
+  }
+
+  const big = document.getElementById('big');
+  for (const item of MAP) {
+    const card = document.createElement('div'); card.className = 'card';
+    const holder = document.createElement('div');
+    holder.style.cssText = 'width:54px;height:54px;display:flex;align-items:center;justify-content:center';
+    holder.appendChild(rowFor(item[2], '', ''));
+    card.appendChild(holder);
+    const n = document.createElement('div'); n.className = 'name'; n.textContent = item[0];
+    const k = document.createElement('div'); k.className = 'key'; k.textContent = item[1];
+    card.appendChild(n); card.appendChild(k);
+    big.appendChild(card);
+  }
+
+  const small = document.getElementById('small');
+  for (const item of MAP) {
+    const card = document.createElement('div'); card.className = 'card';
+    card.style.padding = '10px 12px';
+    card.appendChild(rowFor(item[2], item[0], item[1]));
+    small.appendChild(card);
+  }
+
+  const rows = document.getElementById('rows');
+  const demos = [
+    ['d1', 'smile', '思考中'], ['d3', 'dsh-tps', '执行工具'],
+    ['d4', '插件适配 dsh', '等你确认'], ['d6', 'PiliPlus', '失败'],
+    ['d7', '修复 BiliSail', '刚完成'], ['d5', '未命名', '重试中'],
+    ['d0', '会话', '安静']
+  ];
+  for (const d of demos) rows.appendChild(rowFor(d[0], d[1], d[2]));
+
+  setInterval(function () {
+    document.querySelectorAll('#big svg').forEach(function (svg) {
+      svg.setAttribute('width', '54'); svg.setAttribute('height', '54');
+    });
+  }, 100);
+})();
+</script>
+</body></html>

@@ -1,0 +1,60 @@
+{
+  "name": "dsh-grok-buddy",
+  "version": "0.1.0",
+  "description": "Grok Bot's own face in your DSH sidebar: the original GrokBot avatar expressions draw each session's status — idle, thinking, streaming, tool, waiting, retry, error, done — with no extra UI.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./derive": "./lib/derive.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "grok",
+    "grokbot",
+    "avatar",
+    "emoji",
+    "session-status",
+    "ui"
+  ],
+  "license": "BSD-3-Clause",
+  "author": "devzer0o0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devzer0o0/dsh-grok-buddy.git"
+  },
+  "homepage": "https://github.com/devzer0o0/dsh-grok-buddy",
+  "bugs": {
+    "url": "https://github.com/devzer0o0/dsh-grok-buddy/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.1.7-rc.1"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "prepack": "node scripts/build.mjs",
+    "prepublishOnly": "node scripts/build.mjs && node --test \"test/*.test.mjs\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

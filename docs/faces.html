@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+ body{margin:0;padding:20px 22px;background:#15171c;color:#e8e8ea;font:13px/1.4 -apple-system,"PingFang SC",sans-serif}
+ .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px}
+ .cell{display:flex;flex-direction:column;align-items:center;gap:7px}
+ .box{width:44px;height:44px;display:flex;align-items:center;justify-content:center}
+ .n{font-size:11.5px;color:#c9cdd6}
+ .k{font-size:9.5px;color:#6b7280;font-family:ui-monospace,Menlo,monospace}
+</style></head><body>
+<div class="grid" id="g"></div>
+<script>
+window.__GROK_BUDDY_DEMO__={now:Date.now(),sessions:[
+ {id:'a',phase:'idle',detail:''},{id:'b',phase:'thinking',detail:''},{id:'c',phase:'streaming',detail:''},{id:'d',phase:'tool',detail:''},
+ {id:'e',phase:'waiting',detail:''},{id:'f',phase:'retry',detail:''},{id:'g',phase:'error',detail:''},{id:'h',phase:'completed',detail:''}]};
+const rf=window.fetch;
+window.fetch=(u,o)=>String(u).includes('/dsh-grok-buddy/state.json')
+ ? Promise.resolve(new Response(JSON.stringify(Object.assign({ok:true},window.__GROK_BUDDY_DEMO__)),{status:200}))
+ : rf.call(window,u,o);
+</script>
+<script src="../lib/widget.js"></script>
+<script>
+(function(){
+ const MAP=[['安静','idle','a'],['思考中','thinking','b'],['输出中','streaming','c'],['执行工具','tool','d'],
+            ['等你确认','waiting','e'],['重试中','retry','f'],['失败','error','g'],['刚完成','completed','h']];
+ const g=document.getElementById('g');
+ for(const [label,phase,id] of MAP){
+   const cell=document.createElement('div'); cell.className='cell';
+   const box=document.createElement('div'); box.className='box';
+   const row=document.createElement('div');
+   row.setAttribute('data-row-key','session:'+id);
+   row.style.cssText='display:flex;align-items:center;justify-content:center';
+   const slot=document.createElement('span');
+   slot.style.cssText='width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center';
+   row.appendChild(slot); box.appendChild(row); cell.appendChild(box);
+   const n=document.createElement('div'); n.className='n'; n.textContent=label;
+   const k=document.createElement('div'); k.className='k'; k.textContent=phase;
+   cell.appendChild(n); cell.appendChild(k); g.appendChild(cell);
+ }
+ setInterval(function(){
+   document.querySelectorAll('svg.dsgb-bot').forEach(s=>{s.setAttribute('width','44');s.setAttribute('height','44')});
+ },80);
+ // 文档图不做动画，截一张静态的更有代表性
+ setTimeout(function(){
+   document.querySelectorAll('svg.dsgb-bot').forEach(s=>{
+     s.setAttribute('width','44'); s.setAttribute('height','44');
+   });
+   const b=window.__dshGrokBuddy; if(b&&b.stop){ /* 保留已经画好的帧 */ }
+ },700);
+})();
+</script></body></html>
