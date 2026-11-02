@@ -8,42 +8,35 @@
 </style></head><body>
 <div class="grid" id="g"></div>
 <script>
-window.__GROK_BUDDY_DEMO__={now:Date.now(),sessions:[
- {id:'a',phase:'idle',detail:''},{id:'b',phase:'thinking',detail:''},{id:'c',phase:'streaming',detail:''},{id:'d',phase:'tool',detail:''},
- {id:'e',phase:'waiting',detail:''},{id:'f',phase:'retry',detail:''},{id:'g',phase:'error',detail:''},{id:'h',phase:'completed',detail:''}]};
-const rf=window.fetch;
-window.fetch=(u,o)=>String(u).includes('/dsh-grok-buddy/state.json')
- ? Promise.resolve(new Response(JSON.stringify(Object.assign({ok:true},window.__GROK_BUDDY_DEMO__)),{status:200}))
- : rf.call(window,u,o);
-</script>
-<script src="../lib/widget.js"></script>
-<script>
-(function(){
- const MAP=[['安静','idle','a'],['思考中','thinking','b'],['输出中','streaming','c'],['执行工具','tool','d'],
-            ['等你确认','waiting','e'],['重试中','retry','f'],['失败','error','g'],['刚完成','completed','h']];
- const g=document.getElementById('g');
- for(const [label,phase,id] of MAP){
-   const cell=document.createElement('div'); cell.className='cell';
-   const box=document.createElement('div'); box.className='box';
-   const row=document.createElement('div');
-   row.setAttribute('data-row-key','session:'+id);
-   row.style.cssText='display:flex;align-items:center;justify-content:center';
-   const slot=document.createElement('span');
-   slot.style.cssText='width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center';
-   row.appendChild(slot); box.appendChild(row); cell.appendChild(box);
-   const n=document.createElement('div'); n.className='n'; n.textContent=label;
-   const k=document.createElement('div'); k.className='k'; k.textContent=phase;
-   cell.appendChild(n); cell.appendChild(k); g.appendChild(cell);
- }
- setInterval(function(){
-   document.querySelectorAll('svg.dsgb-bot').forEach(s=>{s.setAttribute('width','44');s.setAttribute('height','44')});
- },80);
- // 文档图不做动画，截一张静态的更有代表性
- setTimeout(function(){
-   document.querySelectorAll('svg.dsgb-bot').forEach(s=>{
-     s.setAttribute('width','44'); s.setAttribute('height','44');
-   });
-   const b=window.__dshGrokBuddy; if(b&&b.stop){ /* 保留已经画好的帧 */ }
- },700);
+(function () {
+  const MAP = [['安静', 'idle'], ['思考中', 'thinking'], ['输出中', 'streaming'], ['执行工具', 'tool'],
+               ['等你确认', 'waiting'], ['重试中', 'retry'], ['失败', 'error'], ['刚完成', 'completed']];
+  const sessions = [];
+  const g = document.getElementById('g');
+  for (const [label, phase] of MAP) {
+    sessions.push({ id: phase, phase: phase, detail: '' });
+    const cell = document.createElement('div'); cell.className = 'cell';
+    const box = document.createElement('div'); box.className = 'box';
+    const row = document.createElement('div');
+    row.setAttribute('data-row-key', 'session:' + phase);
+    row.style.cssText = 'display:flex;align-items:center;justify-content:center';
+    const slot = document.createElement('span');
+    slot.style.cssText = 'width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center';
+    row.appendChild(slot); box.appendChild(row); cell.appendChild(box);
+    const n = document.createElement('div'); n.className = 'n'; n.textContent = label;
+    const k = document.createElement('div'); k.className = 'k'; k.textContent = phase;
+    cell.appendChild(n); cell.appendChild(k); g.appendChild(cell);
+  }
+  window.__GROK_BUDDY_DEMO__ = { now: Date.now(), sessions: sessions };
+  const realFetch = window.fetch;
+  window.fetch = (u, o) => String(u).includes('/dsh-grok-buddy/state.json')
+    ? Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)), { status: 200 }))
+    : realFetch.call(window, u, o);
+  const s = document.createElement('script');
+  s.src = '../lib/widget.js';
+  document.head.appendChild(s);
+  setInterval(function () {
+    document.querySelectorAll('svg.dsgb-bot').forEach((svg) => { svg.setAttribute('width', '44'); svg.setAttribute('height', '44'); });
+  }, 60);
 })();
 </script></body></html>

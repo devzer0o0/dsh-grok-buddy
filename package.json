@@ -1,6 +1,6 @@
 {
   "name": "dsh-grok-buddy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Grok Bot's own face in your DSH sidebar: the original GrokBot avatar expressions draw each session's status — idle, thinking, streaming, tool, waiting, retry, error, done — with no extra UI.",
   "type": "module",
   "main": "lib/index.js",

@@ -5,22 +5,25 @@
  * 本脚本轮询它，在每一行会话左侧的状态位里画一只 GrokBot。
  *
  * 头像本身就是 GrokBot：球面投影的眼睛会随转头变形、表情切换用弹簧、会眨眼。
- * 我们只做三件事：选状态、选颜色、放进 16px 的格子里。
+ * 我们只做三件事：选状态、选墨色、放进 16px 的格子里。
  *
- * 设计依据（x.ai/news/designing-grok-bot）：官方把状态直接画在头像上，
- * 而不是另加一个指示器 —— 所以这里也是同一套生命周期。
+ * 设计依据（https://x.ai/news/designing-grok-bot）：官方把状态直接画在头像上，
+ * 而不是另加一个指示器 —— 所以这里也是同一套生命周期（Idle / Working /
+ * Waiting / Blocked / Thinking / Done），同一组官方墨色（见 mapping.js 的 INK）。
  *
  * @module dsh-grok-buddy/widget
  */
 
 import { TB_EXPRESSIONS, TB_SHAPES, TB_STATES } from './grokbot/data.js'
 import { createBot, runBot } from './grokbot/engine.js'
-import { PHASE_TO_STATE, PHASE_TEXT, themeOf } from './mapping.js'
+import { INK, LIFECYCLE, PHASE_TO_STATE, PHASE_TEXT, SURFACE, inkOf, surfaceOf, themeOf } from './mapping.js'
 
-const BUILD = '2026-11-02b'
+const BUILD = '2026-11-02c'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const POLL_MS = 500
 const POLL_HIDDEN_MS = 2000
+/** 抽查一次眼睛底色的间隔（毫秒）—— 底色在变，但不值得每帧都量。 */
+const SURFACE_CHECK_MS = 1500
 const BOT_CLASS = 'dsgb-bot'
 const SLOT_ATTR = 'data-dsgb-slot'
 const ROW_ATTR = 'data-dsgb-row'
@@ -31,8 +34,10 @@ const ROW_ATTR = 'data-dsgb-row'
 function boot() {
   if (window.__dshGrokBuddy !== undefined) return
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-  const dark = detectDark()
+  let dark = detectDark()
   const text = /^zh/i.test(navigator.language || '') ? PHASE_TEXT.zh : PHASE_TEXT.en
+  /** 主题变了的回调集合（mount 时登记，切主题时统一重刷）。 */
+  const repainters = new Set()
 
   injectStyles()
 
@@ -43,15 +48,47 @@ function boot() {
   let stopped = false
   let timer = null
 
+  /**
+   * 读 DSH 自己的深色开关。侧栏主题一旦不是「跟随系统」，只用
+   * `prefers-color-scheme` 会判错 —— 眼睛填的是背景色，判错就是一只对不上
+   * 底色的脸。所以文档标记 > 计算样式 > 系统偏好，依次降级。
+   */
   function detectDark() {
-    if (typeof matchMedia !== 'function') return true
-    return matchMedia('(prefers-color-scheme: dark)').matches || document.documentElement.dataset.theme === 'dark'
+    const root = document.documentElement
+    if (root.dataset.dsTheme === 'dark') return true
+    if (root.dataset.dsTheme === 'light') return false
+    if (root.dataset.theme === 'dark') return true
+    if (root.dataset.theme === 'light') return false
+    if (typeof getComputedStyle === 'function') {
+      const scheme = getComputedStyle(root).colorScheme || ''
+      if (scheme.indexOf('dark') !== -1) return true
+      if (scheme.indexOf('light') !== -1) return false
+    }
+    if (typeof matchMedia === 'function') return matchMedia('(prefers-color-scheme: dark)').matches
+    return true
+  }
+
+  /**
+   * 把一只头像刷成当前相位 + 当前主题的墨色。
+   * 眼睛和官方一样填**背景色**（`.eye{fill:var(--bg)}`），底色从状态位背后量出来。
+   */
+  function paint(record, phase) {
+    const surface = surfaceOf(record.slot, dark)
+    const theme = themeOf(phase, dark, surface)
+    record.phase = phase
+    record.dark = dark
+    record.surface = surface
+    record.checkedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    record.inst.body.setAttribute('fill', theme.body)
+    record.inst.eyeL.setAttribute('fill', theme.eye)
+    record.inst.eyeR.setAttribute('fill', theme.eye)
   }
 
   function mountInto(slot, phase) {
     let record = mounted.get(slot)
-    const theme = themeOf(phase, dark)
     if (record === undefined) {
+      const surface = surfaceOf(slot, dark)
+      const theme = themeOf(phase, dark, surface)
       const inst = createBot({
         shape: TB_SHAPES.blob,
         bodyFill: theme.body,
@@ -61,22 +98,50 @@ function boot() {
       inst.state = PHASE_TO_STATE[phase] || 'idle'
       inst.svg.classList.add(BOT_CLASS)
       runBot(inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: reduce })
-      record = { inst, phase }
+      record = { inst, phase, dark, surface, slot, checkedAt: 0 }
       mounted.set(slot, record)
+      const row = { record, slot }
+      repainters.add(row)
       slot.appendChild(inst.svg)
       return record
     }
     if (record.phase !== phase) {
-      record.phase = phase
       record.inst.state = PHASE_TO_STATE[phase] || 'idle'
       record.inst.token += 1
       record.inst.pool = null
-      record.inst.body.setAttribute('fill', theme.body)
-      record.inst.eyeL.setAttribute('fill', theme.eye)
-      record.inst.eyeR.setAttribute('fill', theme.eye)
+      paint(record, phase)
+    } else if (record.dark !== dark) {
+      paint(record, phase)
+    } else {
+      // 底色会随主题/悬停变（眼睛填的就是它）。每帧都量一次 getComputedStyle
+      // 太贵，所以隔一段时间抽查一次，变了才重刷。
+      const at = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      if (at - record.checkedAt >= SURFACE_CHECK_MS) {
+        record.checkedAt = at
+        if (surfaceOf(slot, dark) !== record.surface) paint(record, phase)
+      }
     }
     if (record.inst.svg.parentNode !== slot) slot.appendChild(record.inst.svg)
     return record
+  }
+
+  /**
+   * 主题切换：重新判定深浅，并把所有已挂上的头像按新主题重刷一遍。
+   * 深浅没变也要重刷 —— 同样是暗色，底色也可能被换掉（眼睛填的就是底色）。
+   */
+  function onThemeChange() {
+    dark = detectDark()
+    for (const row of repainters) {
+      if (!row.record.inst.svg.isConnected) {
+        repainters.delete(row)
+        continue
+      }
+      // 只在真的变了的时候重画：这个回调会被文档上的 class/style 抖动触发
+      const surface = surfaceOf(row.slot, dark)
+      if (row.record.dark === dark && row.record.surface === surface) continue
+      paint(row.record, row.record.phase)
+    }
+    syncRows()
   }
 
   function labelOf(phase, detail) {
@@ -185,8 +250,16 @@ function boot() {
 
   const observer = new MutationObserver(onChange)
   observer.observe(document.body, { subtree: true, childList: true })
+  // DSH 切主题时会改文档上的标记，跟着重刷墨色
+  const themeObserver = new MutationObserver(onThemeChange)
+  for (const el of [document.documentElement, document.body]) {
+    themeObserver.observe(el, { attributes: true, attributeFilter: ['data-ds-theme', 'data-theme', 'class', 'style'] })
+  }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) poll()
+    if (!document.hidden) {
+      onThemeChange()
+      poll()
+    }
   })
   window.addEventListener('resize', onChange)
 
@@ -197,11 +270,20 @@ function boot() {
     version: BUILD,
     states: PHASE_TO_STATE,
     phases: Object.keys(PHASE_TO_STATE),
+    lifecycle: LIFECYCLE,
+    /** 读当前相位对应的官方墨色（调试/截图用）。 */
+    ink(phase, isDark) {
+      return inkOf(phase, isDark === undefined ? dark : isDark)
+    },
+    /** 官方墨色表与兜底底色，方便外部核对。 */
+    palette: { ...INK, surface: SURFACE },
     sync: syncRows,
     stop() {
       stopped = true
       if (timer !== null) clearTimeout(timer)
       observer.disconnect()
+      themeObserver.disconnect()
+      repainters.clear()
       window.removeEventListener('resize', onChange)
       const svgs = document.querySelectorAll('.' + BOT_CLASS)
       for (const svg of svgs) svg.remove()

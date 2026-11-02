@@ -43,19 +43,27 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 
 ## 状态映射
 
-官方生命周期是 Idle / Working / Waiting / Blocked / Thinking / Done。DSH 的事件更细，
-映射关系如下（左：DSH 相位，右：GrokBot 状态）：
+官方生命周期是六个：Idle / Working / Waiting / Blocked / Thinking / Done
+（见 [Designing Grok Bot](https://x.ai/news/designing-grok-bot)）。
+**颜色只表示生命周期，动作只表示这一刻在干嘛** —— 和官方一致：同一个阶段不会因为
+「正在吐字」还是「正在跑工具」换颜色，换的是脸上的小动作。
 
-| DSH 相位 | 触发条件 | GrokBot 状态 | 外观 |
-| --- | --- | --- | --- |
-| `idle` | 没有活动 | `idle` | 灰蓝，平静地眨眼 |
-| `thinking` | 已发请求、等首 token | `thinking` | 紫色，眼珠来回游移 |
-| `streaming` | 模型正在吐字 | `working` | 蓝色，专注 |
-| `tool` | 工具执行中 | `working` | 青绿，专注 |
-| `waiting` | 审批挂起，轮到你 | `bored` | 橙色，有点百无聊赖地等你 |
-| `retry` | 请求失败、正在退避重试 | `curious` | 琥珀，歪头看你 |
-| `error` | 本轮以错误收场 | `alerting` | 红色，警觉 |
-| `completed` | 刚做完、还没被看过 | `celebrate` | 青绿，开心 |
+墨色全部取自 x.ai 站点里 Grok Bot 头像的 `ink` 值和状态徽章配色，一字不改：
+
+| DSH 相位 | 触发条件 | 官方生命周期 | 墨色（官方来源） | 小动作 |
+| --- | --- | --- | --- | --- |
+| `idle` | 没有活动 | Idle | `#9A9A9A` / `#777777`（`--fig-gray`） | 平静地眨眼 |
+| `thinking` | 已发请求、等首 token | Thinking | `#9159FE`（hex Bot 的 ink） | 眼珠来回游移 |
+| `streaming` | 模型正在吐字 | Working | `#1084FE`（主角 blob 的 ink） | 专注 |
+| `tool` | 工具执行中 | Working | `#1084FE`（同上，**同色**） | `searching`：找、读、敲 |
+| `waiting` | 审批挂起，轮到你 | Waiting | `#FF9800`（徽章 warn） | `bored`：等得有点无聊 |
+| `retry` | 请求失败、正在退避重试 | Waiting | `#FF9800`（同上，**同色**） | `curious`：歪头看着下一次 |
+| `error` | 本轮以错误收场 | Blocked | `#FF263C`（徽章 error） | `alerting`：警觉 |
+| `completed` | 刚做完、还没被看过 | Done | `#00C972`（徽章 done） | `celebrate`：开心 |
+
+眼睛和官方一样填**背景色**（官方 `.head{fill:var(--fg)}` / `.eye{fill:var(--bg)}`）。
+插件没有 DSH 的主题变量，所以直接从状态位背后量出实际底色再填 —— 亮色、暗色、
+以及任何自定义侧栏色，眼睛都对得上。
 
 鼠标悬停能看到具体细节（在读哪个工具、失败代号、重试次数）。
 
@@ -108,6 +116,8 @@ pnpm add github:devzer0o0/dsh-grok-buddy
 * 轮询 state.json，在每一行 `[data-row-key^="session:"]` 的 18px 状态位里放一只头像
 * 隐藏框架自带的圆点和转圈（只针对状态位内部，不碰其它插件的座位）
 * 头像实例按 DOM 槽位索引，同一会话同时出现在列表和搜索里也不会互相抢节点
+* 眼睛的底色**从状态位背后量**（`surfaceOf`，逐级往上找到第一个不透明背景），
+  主题一变就重刷 —— 这样跟随系统 / 手动切深浅 / 自定义侧栏色都能对上
 
 **只读观测**：不写会话、不改模型请求、不注册投影。卸载后把挂上去的节点全部摘掉。
 
@@ -121,6 +131,8 @@ node --test "test/*.test.mjs"     # 11 个相位推导单测
 ```
 
 打开 `preview.html`（需要起个静态服务，因为用了 ES module）可以看八种状态的实时效果，
+`docs/faces.html` 是同一套的静态版，`docs/palette-check.html` 把八只脸并排放进
+暗色与亮色两种侧栏底色里，专门用来核对「墨色对不对、眼睛和底色对不对得上」。
 它跑的是构建产物本身，不依赖 DSH。
 
 ## 致谢与许可

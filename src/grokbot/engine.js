@@ -148,8 +148,10 @@ export const BOT_INSET = INSET
  * @param {object} opts 选项。
  * @param {Array} opts.expressions 表情表。
  * @param {object} opts.shape 体形描述。
- * @param {string} opts.bodyFill 身体颜色。
- * @param {string} opts.eyeFill 眼睛颜色（默认取背景色，形成「挖空」效果）。
+ * @param {string} opts.bodyFill 身体颜色（官方墨色）。
+ * @param {string} opts.eyeFill 眼睛颜色。
+ *   官方 Grok Bot 的眼睛是**挖空**的（`.eye{fill:var(--bg)}`），所以这里传
+ *   `'none'`，让 clip-path 直接透出侧栏背景 —— 换主题时不会露出一层错色。
  * @param {number} opts.size 像素尺寸。
  * @returns {object} 实例。
  */
