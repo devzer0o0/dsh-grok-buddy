@@ -48,13 +48,14 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 | 层 | 是什么 | 出现在哪里 |
 | --- | --- | --- |
 | **运行状态**（runtimePhase / displayPhase） | **只有六种**：idle / working / waiting / blocked / thinking / done | 接口、文档、读屏标签、data-dsgb-phase |
-| **动作预设**（motionPreset） | 内部动画资源名：idle / working / bored / alerting / thinking / celebrate | data-dsgb-motion（明确标注是动画资源） |
-| **表情素材**（expression） | 25 张眼型，按动作的表情池取用 | 只在渲染引擎内部 |
+| **动作**（motion） | 内部动画资源名：rest / spin / half-lidded / bang / tri-dot / orbit | data-dsgb-motion（明确标注是动画资源） |
+| **图形构成**（figure） | 这一态画的是什么：avatar / avatar+trail / exclamation / dots / avatar+orbit | data-dsgb-figure |
+| **表情素材**（expression） | 25 张眼型，只服务 idle / working / done 的眼睛造型 | 只在渲染引擎内部 |
 
 所以：
 
-* **动作预设库有多少条,不等于插件有多少种状态。** 素材库里还有 proud、excited、
-  curious、sleeping 等二十多个动作，它们**不是**运行状态。
+* **素材库有多少条,不等于插件有多少种状态。** 素材库里还有 proud、excited、
+  curious、sleeping 等二十多个预设，它们**不是**运行状态，也不再是六态动画的实现。
 * **表情图里的名字,不等于运行状态。** docs/faces.html 里那些 sleeping / waking /
   searching / curious / proud 只是 idle 的表情素材参考，不参与会话状态判定。
 * 事实与标志位（selected / seen / consumed / stale）也不是状态。
@@ -128,7 +129,7 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 
 所以 done 路径上：
 
-* 活跃完成期间**一直** celebrate，**没有**固定 2.6 秒退回；
+* 活跃完成期间**一直**做庆祝动作（orbit），**没有**固定 2.6 秒退回；
 * 同一完成周期只初始化一次，持续播放期间不重复重启动画；
 * 用户查看期间仍显示 done + 项目色；
 * 查看后切走，或完成展示活跃期结束 → idle、灰、停止庆祝；
@@ -247,27 +248,57 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 
 ### 动作
 
-六个状态各对一个动作预设（**预设名不是状态名**）：
+六个状态各对一个**动作**（动作名不是状态名）。动作的具体形态与量测过程见
+[docs/motion-spec.md](docs/motion-spec.md)，实现见 `src/grokbot/motion.js`。
 
-| 状态 | 动作预设 | 看得出来的动作 |
+| 状态 | 动作 | 画的是什么 |
 | --- | --- | --- |
-| idle | idle | 平静地眨眼，9–16s 才换一次脸 |
-| thinking | thinking | 眼珠游移，2.0–3.6s 换脸 |
-| working | working | 专注，1.8–3.2s（最快） |
-| waiting | bored | 等得有点无聊，3.5–6.0s（最慢） |
-| blocked | alerting | **不眨眼**、表情池只有 2 张（定住） |
-| done | celebrate | 持续庆祝，直到查看切走或失活 |
+| idle | `rest` | 圆头像 + 竖眼；每 6.4 s 一次「看一眼再停住」的慢转头，4.8 s 眨眼一次 |
+| working | `spin` | 圆头像；进入时甩一下头（眼睛压到侧面再回来），随后持续左右张望；**只在进入后 1.2 s 内**甩出一道多色弧形拖尾，随后缩短淡出 |
+| waiting | `half-lidded` | 圆头像 + 压扁上翘的横线眼（0.175D×0.065D，+12°/+14°），低活动度呼吸 |
+| blocked | `bang` | **头像退出**，主体是感叹号：上方圆头长条（顶宽 0.146D、上宽下窄）+ 下方圆点（0.121D），稳态完全静止 |
+| thinking | `tri-dot` | **头像退出**，三颗横排圆点依次脉动：周期 1.4 s、相位差 1/3、直径 17→22.5 px 的等比例缩放 |
+| done | `orbit` | 头像长回来并缓慢转动，6 条不同倾角/方向的彩色轨道环绕，按深度分成头像**身后**与**身前**两层，形成绕行遮挡 |
 
-blocked 的「不眨眼」是最好认的一条：其它动作都会眨，它定住不动。
+这四条是硬要求，也是验收时要看的：
+
+* **blocked 必须是感叹号**，不是「两个圆眼睛不眨眼」；
+* **thinking 必须是三点脉动**，不是「斜眼思考脸」；
+* **done 必须有环绕轨道**，不是「笑眼 + 更快的眨眼」；
+* **working 必须有转身与短拖尾**，不是「换脸更快」。
+
+颜色仍然只表示项目身份：六态同色。轨道与拖尾是参考动画里明确存在的**特效层**，
+保留多色；头像、感叹号、思考点的基础墨色仍是项目色（思考点的明暗是同一色的透明度）。
 
 **prefers-reduced-motion**：**不启动持续动画**——不是只关掉转头和视线偏移。
-眨眼、随机换脸、弹簧形变与 RAF 全部停掉，直接画一帧该状态的静态姿态；
+眨眼、转头、轨道旋转、拖尾与 RAF 全部停掉，直接画一帧该状态的**代表性静态姿态**；
 六态的区分靠姿态本身加可访问文案（aria-label 跟着状态更新，中英各一套）。
 系统偏好在运行时变化时会重画静态姿态或恢复动画，**不改变任何业务状态**：
 done 在 reduced-motion 下仍是 done。诊断里的 `animating` 依据引擎真实运行
 状态，而不是「有没有 dispose 函数」。
 
+静态姿态也保留六态的可识别性，不会全退回普通圆脸：
+blocked 还是感叹号、thinking 还是三颗点、done 还是头像 + 轨道、working 还是带头像与拖尾。
+
 鼠标悬停能看到具体细节（在读哪个工具、失败代号）。
+
+### 动态预览与真浏览器核对
+
+`preview.html` 用**产品同一个渲染器**做对照台，不是另写一套演示动画：
+
+* 六态单切 / 并排；64 / 32 / 16 px 三档真实尺寸；
+* 项目色与白色参考模式；深色与浅色背景；
+* 播放、暂停、16ms/100ms 步进、0.25× 与 1× 速度；
+* 任意两态互切（idle→thinking、thinking→working、working→done、done→thinking …），
+  不只是 GIF 里的固定顺序；
+* 同态反复送快照但不重播、reduced-motion 开关、done 长时间持续、深浅背景切换。
+
+参考录屏的对应帧放在 `docs/reference-*.png`，与实现并排对照（已裁掉播放按钮、
+六态标签、进度条和鼠标 —— 它们不是头像的一部分）。
+
+`node scripts/browser-check.mjs` 会起一个真的 Chrome（headless、零依赖 CDP），
+在真实 SVG 上核对图层构成、16px 布局矩形、轨道是否被裁、帧是否真的在推进、
+同态快照是否误重启动画、reduced-motion 是否真的不跑帧，并输出截图。
 
 ## 界面适配：不是只有侧栏那一种行
 

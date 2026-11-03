@@ -5,7 +5,7 @@
  * 走真实的 boot → fetch → absorb → sync → mount → 动画 → dispose。
  *
  * 覆盖的都是「只有真跑才会暴露」的问题：
- *   · done 在 2.6s / 3s / 6s / 30s 之后是否还在 celebrate；
+ *   · done 在 2.6s / 3s / 6s / 30s 之后是否仍在庆祝动作（orbit）；
  *   · 连续轮询是否重启了动画；
  *   · 查看并切走之后是否变灰且不再庆祝；
  *   · 槽位复用 / 重挂载 / 多实例；
@@ -21,6 +21,7 @@ import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { Doc, El, jsonResponse } from './dom-harness.mjs'
+import { PHASE_TO_MOTION } from '../src/mapping.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BUNDLE = path.join(HERE, '..', 'lib', 'widget.js')
@@ -265,6 +266,12 @@ function makeSection(doc, workspaceId) {
 }
 
 /** 从某一行里拿出头像 svg。 */
+/** 取眼睛图层（按图层标记找，不依赖子节点序号）。 */
+function eyeLayer(bot) {
+  const group = bot.querySelector('[data-dsgb-layer="eyes"]')
+  return group === null ? null : group.children[0]
+}
+
 function botOf(slot) {
   return slot.children.find((child) => String(child.getAttribute('class') || '').indexOf('dsgb-bot') !== -1)
 }
@@ -334,12 +341,12 @@ test('done 在 2.6s / 3s / 6s / 30s 之后始终保持 celebrate', async () => {
   const { slot } = makeRow(h.doc, section, 's1', false)
   h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
-  assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'celebrate')
+  assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'orbit')
 
   for (const wait of [2600, 400, 3000, 24000]) {
     await h.tick(wait)
     assert.equal(botOf(slot).getAttribute('data-dsgb-phase'), 'done', '第 ' + wait + 'ms 后仍是 done')
-    assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'celebrate', '第 ' + wait + 'ms 后仍在庆祝')
+    assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'orbit', '第 ' + wait + 'ms 后仍在庆祝')
   }
   h.api.stop()
 })
@@ -355,7 +362,7 @@ test('初次拿到 done 后停掉后续轮询，也不会有隐藏定时器把�
   await h.frame(120)
   await h.tick(8000)
   assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), before)
-  assert.equal(before, 'celebrate')
+  assert.equal(before, 'orbit')
   h.api.stop()
 })
 
@@ -368,14 +375,14 @@ test('同一状态连续轮询不重启动画（不重置相位起点）', async
   const bot = botOf(slot)
   // 记录一次动画 tick 之后眼环的点数，再轮询若干次，点位应继续演进而不是回到初值
   await h.frame(3)
-  const before = bot.children[0].children[2].children[0].getAttribute('points')
+  const before = eyeLayer(bot).getAttribute('points')
   for (let i = 0; i < 8; i++) {
     await h.tick(500)
     await h.frame(1)
   }
-  const after = bot.children[0].children[2].children[0].getAttribute('points')
+  const after = eyeLayer(bot).getAttribute('points')
   assert.notEqual(before, after, '动画应该在继续演进')
-  assert.equal(bot.getAttribute('data-dsgb-motion'), 'working')
+  assert.equal(bot.getAttribute('data-dsgb-motion'), PHASE_TO_MOTION.working)
   h.api.stop()
 })
 
@@ -389,7 +396,7 @@ test('done 过程中进入新一轮，旧回调不得覆盖新的状态', async 
   h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
   await h.tick(600)
   assert.equal(botOf(slot).getAttribute('data-dsgb-phase'), 'thinking')
-  assert.notEqual(botOf(slot).getAttribute('data-dsgb-motion'), 'celebrate')
+  assert.notEqual(botOf(slot).getAttribute('data-dsgb-motion'), 'orbit')
   h.api.stop()
 })
 
@@ -437,7 +444,7 @@ test('新一轮完成会建立新的展示周期（新 completionKey 重新庆�
   h.setState(sessionsBody([doneRow('s1', 'k2', h.now)]))
   await h.tick(600)
   assert.equal(botOf(made.slot).getAttribute('data-dsgb-phase'), 'done', '新完成重新庆祝')
-  assert.equal(botOf(made.slot).getAttribute('data-dsgb-motion'), 'celebrate')
+  assert.equal(botOf(made.slot).getAttribute('data-dsgb-motion'), 'orbit')
   h.api.stop()
 })
 
@@ -477,7 +484,8 @@ test('槽位被移除后重新挂回，动画会重新起来（不是静止 SVG�
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const made = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
+  // 用 working：它有眼睛也有拖尾，两样都在动，能证明帧真的在推进
+  h.setState(sessionsBody([phaseRow('s1', 'working')]))
   await h.tick(600)
   const bot = botOf(made.slot)
 
@@ -487,14 +495,34 @@ test('槽位被移除后重新挂回，动画会重新起来（不是静止 SVG�
 
   // 挂回来，再跑两帧：动画必须重新起来（而不是一张静止 SVG）
   made.slot.insertBefore(bot, made.slot.firstChild)
-  h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
+  h.setState(sessionsBody([phaseRow('s1', 'working')]))
   await h.tick(600)
   await h.frame(2)
-  const eye = bot.children[0].children[2].children[0]
+  const eye = eyeLayer(bot)
   const pointsA = eye.getAttribute('points')
   await h.frame(6)
   const pointsB = eye.getAttribute('points')
   assert.notEqual(pointsA, pointsB, '重新挂回后动画应继续演进（不是静止 SVG）')
+  h.api.stop()
+})
+
+test('符号态（thinking 三点）摘下重挂后同样会继续脉动', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, section, 's1', false)
+  h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
+  await h.tick(600)
+  const bot = botOf(made.slot)
+  const dots = () => bot.querySelector('[data-dsgb-layer="dots"]').children.map((c) => c.getAttribute('r')).join(',')
+  bot.remove()
+  await h.frame(2)
+  made.slot.insertBefore(bot, made.slot.firstChild)
+  h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
+  await h.tick(600)
+  await h.frame(2)
+  const before = dots()
+  await h.frame(10)
+  assert.notEqual(dots(), before, '三点必须继续脉动')
   h.api.stop()
 })
 

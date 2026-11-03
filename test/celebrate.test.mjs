@@ -32,7 +32,7 @@ function simulate(keys, memory, completions) {
 test('done 全程持续 celebrate，永不收敛成别的表情', () => {
   const phases = new Array(200).fill('done')
   const { shown } = simulate(phases, freshMemory())
-  for (const round of shown) assert.equal(round.motion, 'celebrate')
+  for (const round of shown) assert.equal(round.motion, CELEBRATE_MOTION)
 })
 
 test('同一完成周期只初始化一次', () => {
@@ -43,7 +43,7 @@ test('同一完成周期只初始化一次', () => {
 })
 
 test('done 的动作和 idle 明显不同', () => {
-  assert.equal(resolveMotion('done', freshMemory(), MOTIONS, KEY).motion, 'celebrate')
+  assert.equal(resolveMotion('done', freshMemory(), MOTIONS, KEY).motion, CELEBRATE_MOTION)
   assert.equal(resolveMotion('idle', freshMemory(), MOTIONS, KEY).motion, MOTIONS.idle)
   assert.notEqual(MOTIONS.done, MOTIONS.idle)
 })
@@ -52,13 +52,13 @@ test('离开 done 之后记忆清零，下一次完成建立新周期', () => {
   let mem = freshMemory()
   let r = resolveMotion('done', mem, MOTIONS, KEY)
   mem = r.memory
-  assert.equal(r.motion, 'celebrate')
+  assert.equal(r.motion, CELEBRATE_MOTION)
   r = resolveMotion('thinking', mem, MOTIONS, KEY)
   mem = r.memory
   assert.equal(r.motion, MOTIONS.thinking)
   assert.deepEqual(mem, freshMemory(), '离开 done 要清零')
   r = resolveMotion('done', mem, MOTIONS, KEY)
-  assert.equal(r.motion, 'celebrate')
+  assert.equal(r.motion, CELEBRATE_MOTION)
   assert.equal(r.start, true, '新周期需要初始化')
 })
 

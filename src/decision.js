@@ -99,6 +99,14 @@ export function emptyFacts(sessionId) {
     tools: [],
     /** 未解决的交互：undefined 或 { kind: 'approval'|'question'|'plan-review', toolName, at, key }。 */
     pendingInteraction: undefined,
+    /**
+     * **所有**未解决的交互：[{ kind, toolName, at, key, turnKey, source }]。
+     *
+     * 为什么不能只留一个：同一轮里可能同时有审批 + 提问，甚至两条提问。
+     * 用单个槽位时「回答掉第一个」会把第二个一起丢掉，waiting 直接掉成 thinking。
+     * 单个槽位仍然保留（它是「优先级最高那个」的投影），兼容既有读法。
+     */
+    pendingInteractions: [],
     /** 当前**有效**错误（新任务开始、或后续成功会清掉）：undefined 或 { kind, code, message, at, turnKey }。 */
     error: undefined,
     /** 明确的终态事实（与展示状态分开保存）：undefined 或 { kind, turnKey, completedAt, completionKey, at }。 */
@@ -237,7 +245,14 @@ export function decide(facts, options) {
     return { phase: 'idle', reason: 'terminal-' + String(terminal.kind), completionKey, done: false }
   }
 
-  const pending = f.pendingInteraction
+  // 交互是**集合**：任一未解决就算 waiting。单个槽位只是它的投影，
+  // 不能代表全部（否则「答完一个」会把其余的也一起丢掉）。
+  const pendingList = Array.isArray(f.pendingInteractions) && f.pendingInteractions.length > 0
+    ? f.pendingInteractions
+    : f.pendingInteraction !== undefined && f.pendingInteraction !== null
+      ? [f.pendingInteraction]
+      : []
+  const pending = pendingList.length > 0 ? pendingList[0] : undefined
   const tools = Array.isArray(f.tools) ? f.tools : []
   const error = f.error
   const silenceTtl = typeof opts.silenceTtlMs === 'number' ? opts.silenceTtlMs : TURN_SILENCE_TTL_MS
@@ -265,7 +280,9 @@ export function decide(facts, options) {
     return { phase: 'blocked', reason: 'error:' + String(error.code || error.kind || ''), completionKey, done: false }
   }
   if (pending !== undefined && pending !== null) {
-    return { phase: 'waiting', reason: 'pending:' + String(pending.kind || 'interaction'), completionKey, done: false }
+    const kind = String(pending.kind || 'interaction')
+    const suffix = pendingList.length > 1 ? ' x' + pendingList.length : ''
+    return { phase: 'waiting', reason: 'pending:' + kind + suffix, completionKey, done: false }
   }
   if (tools.length > 0) {
     return { phase: 'working', reason: 'tool:' + String(tools[0].name || ''), completionKey, done: false }

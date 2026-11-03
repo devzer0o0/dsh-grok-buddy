@@ -18,8 +18,8 @@
  * @module dsh-grok-buddy/widget
  */
 
-import { TB_EXPRESSIONS, TB_SHAPES, TB_STATES } from './grokbot/data.js'
-import { createBot, runBot } from './grokbot/engine.js'
+import { TB_EXPRESSIONS, TB_SHAPES } from './grokbot/data.js'
+import { createBot, runBot, setBotInk } from './grokbot/engine.js'
 import { LIFECYCLE, PHASE_TEXT, PHASE_TO_MOTION, SURFACE, surfaceOf, themeOf } from './mapping.js'
 import { IDENTITY_INKS, UNGROUPED_KEY, defaultInk, inkOfProject, normalizeColor, storeKey } from './palette.js'
 import { collectSurfaces } from './dom.js'
@@ -30,7 +30,7 @@ import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '.
 import { paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04a'
+const BUILD = '2026-11-04-motion3'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
@@ -49,6 +49,21 @@ const PROJECT_ATTR = 'data-dsgb-project'
 const MENU_SURFACE = '[data-menu-material]'
 /** 头像边长：与 DSH 原生 16px 前导位逐像素对齐。 */
 const BOT_SIZE = 16
+/**
+ * 动作 → 图形构成（诊断与文档共用）。
+ *
+ * 这是「这一态到底画的是什么」的机器可读版本：blocked 必须是感叹号、
+ * thinking 必须是三点、done 必须有轨道。测试断言图层与它，
+ * 而不是断言 `data-motion="celebrate"` 这种名字。
+ */
+const FIGURE_OF_MOTION = Object.freeze({
+  rest: 'avatar',
+  spin: 'avatar+trail',
+  'half-lidded': 'avatar',
+  bang: 'exclamation',
+  'tri-dot': 'dots',
+  orbit: 'avatar+orbit',
+})
 /** 单页面的实例标识（诊断里区分多窗口 / 多页面）。 */
 const PAGE_ID = Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36)
 
@@ -97,6 +112,13 @@ function boot() {
    *   只有「查看过、并且现在已经不选中」才写 consumedAt。
    */
   const completions = new Map()
+  /**
+   * 会话 → 当前完成周期的身份绑定：{ key, host, gen }。
+   *
+   * 用来把「兜底身份（native:s1#0）」和「宿主 completionKey」绑到同一次完成上，
+   * 见 bindLifecycleKey。真正的新完成会换代，绑定随之重置。
+   */
+  const identityBinding = new Map()
 
   /**
    * 原生 done 的兜底完成周期：
@@ -239,9 +261,8 @@ function boot() {
     record.surface = surface
     record.ink = ink
     record.checkedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    record.inst.body.setAttribute('fill', theme.body)
-    record.inst.eyeL.setAttribute('fill', theme.eye)
-    record.inst.eyeR.setAttribute('fill', theme.eye)
+    // 符号层（感叹号 / 思考点）与身体同墨色：颜色是项目身份，六态同色
+    setBotInk(record.inst, theme.body, theme.eye)
   }
 
   /**
@@ -255,7 +276,7 @@ function boot() {
     if (reduce) {
       // 减少动效：不播持续运动，只用可区分的静态姿态 + 可访问文案表达六态
       record.motion = freshMemory()
-      return PHASE_TO_MOTION[phase] || 'idle'
+      return PHASE_TO_MOTION[phase] || PHASE_TO_MOTION.idle
     }
     const resolved = resolveMotion(phase, record.motion, PHASE_TO_MOTION, completionKey)
     record.motion = resolved.memory
@@ -272,7 +293,7 @@ function boot() {
   function stamp(record) {
     const svg = record.inst.svg
     const phase = record.phase || 'idle'
-    const motion = record.motionName || PHASE_TO_MOTION[phase] || 'idle'
+    const motion = record.motionName || PHASE_TO_MOTION[phase] || PHASE_TO_MOTION.idle
     if (svg.getAttribute('data-dsgb-phase') !== phase) svg.setAttribute('data-dsgb-phase', phase)
     if (svg.getAttribute('data-dsgb-motion') !== motion) svg.setAttribute('data-dsgb-motion', motion)
     const tone = isActive(
@@ -289,6 +310,8 @@ function boot() {
       ? 'active'
       : 'dormant'
     if (svg.getAttribute('data-dsgb-tone') !== tone) svg.setAttribute('data-dsgb-tone', tone)
+    const figure = FIGURE_OF_MOTION[motion] || FIGURE_OF_MOTION.rest
+    if (svg.getAttribute('data-dsgb-figure') !== figure) svg.setAttribute('data-dsgb-figure', figure)
     if (record.completionKey !== '' && svg.getAttribute('data-dsgb-completion') !== record.completionKey) {
       svg.setAttribute('data-dsgb-completion', record.completionKey)
     }
@@ -364,7 +387,11 @@ function boot() {
     const rawPhase = known ? normalizePhaseInput(entry.phase) : 'idle'
     // 原生 done 由 DOM 适配层单独读，这里先占位（多表面时取「任一表面说过 done」）
     const nativeDone = nativeDoneSessions.has(sessionId) === true
-    let completionKey = known && typeof entry.completionKey === 'string' ? entry.completionKey : ''
+    const hostPhase = rawPhase
+    const hostKeyRaw = known && typeof entry.completionKey === 'string' ? entry.completionKey : ''
+    // 只有**这一轮真的完成**时，宿主给的 completionKey 才算完成身份。
+    // 否则「会话历史上完成过、现在在跑新一轮」也会带着旧 key，被当成新完成重播。
+    const completionKey = hostPhase === 'done' || nativeDone ? hostKeyRaw : ''
 
     // 需要兜底完成身份的条件是「缺少可靠完成身份」，**不是**「插件不认识这个会话」：
     // 已知会话也可能是 idle + 原生 done（插件漏了 turn/end），那种同样要能消费。
@@ -375,7 +402,71 @@ function boot() {
       // 又不会每次轮询都生成新键。
       lifecycleKey = 'native:' + sessionId + '#' + String(record === undefined ? 0 : record.generation)
     }
+    // 同一次完成不能因为「兜底身份 ↔ 宿主 completionKey」换了键就被当成两次完成 ——
+    // 那会重播入场。把两个键绑到同一条生命周期上（见 bindLifecycleKey）。
+    if (lifecycleKey !== '') {
+      const gen = nativeCompletions.get(sessionId)
+      lifecycleKey = bindLifecycleKey(sessionId, lifecycleKey, completionKey !== '', gen === undefined ? 0 : gen.generation)
+    }
     return { sessionId, known, rawPhase, entry: known ? entry : null, completionKey: lifecycleKey, nativeDone, lifecycleKey }
+  }
+
+  /**
+   * 把「同一次完成」的不同身份绑成一条生命周期记录。
+   *
+   * 两种真实情况会让同一个完成周期算出两个键：
+   *   · 先只有兜底身份（native:s1#0），下一份快照里宿主补上了 completionKey；
+   *   · 先有宿主 completionKey，之后快照暂时缺字段，只剩原生 done。
+   * 这两条都必须**不重播**。
+   *
+   * 但「同一个会话的下一次完成」必须**重新庆祝**，所以绑定时要带上完成代数：
+   * 兜底键的代数变了、或宿主换了另一个 completionKey，就是新周期，绑定重置。
+   *
+   * @param {string} sessionId 会话 id。
+   * @param {string} key 本次算出的键。
+   * @param {boolean} authoritative 这个键是否来自宿主（权威身份优先）。
+   * @param {number} generation 当前的兜底代数。
+   * @returns {string} 实际使用的键（可能是别名合并后的）。
+   */
+  function bindLifecycleKey(sessionId, key, authoritative, generation) {
+    const binding = identityBinding.get(sessionId)
+    if (binding === undefined) {
+      identityBinding.set(sessionId, { key, host: authoritative, gen: generation })
+      return key
+    }
+    if (binding.key === key) {
+      if (authoritative) binding.host = true
+      binding.gen = generation
+      return key
+    }
+    const samePeriod = authoritative
+      ? binding.host !== true
+      : binding.host === true && generation === binding.gen
+    if (!samePeriod) {
+      identityBinding.set(sessionId, { key, host: authoritative, gen: generation })
+      return key
+    }
+    // 同一次完成的别名：把记录合并到权威键上，并保留查看/消费事实。
+    const fromKey = authoritative ? binding.key : key
+    const toKey = authoritative ? key : binding.key
+    const from = completions.get(fromKey)
+    if (from !== undefined) {
+      const to = completions.get(toKey)
+      if (to === undefined) {
+        completions.set(toKey, from)
+      } else {
+        if (typeof from.consumedAt === 'number' && typeof to.consumedAt !== 'number') to.consumedAt = from.consumedAt
+        if (typeof from.viewedAt === 'number' && typeof to.viewedAt !== 'number') to.viewedAt = from.viewedAt
+        if (typeof from.observedAt === 'number' && (typeof to.observedAt !== 'number' || from.observedAt < to.observedAt)) {
+          to.observedAt = from.observedAt
+        }
+      }
+      completions.delete(fromKey)
+    }
+    binding.key = toKey
+    if (authoritative) binding.host = true
+    binding.gen = generation
+    return toKey
   }
 
   /** 建/更新一只头像。 */
@@ -404,6 +495,7 @@ function boot() {
       const theme = themeOf(ink, dark, surfaceColor)
       const inst = createBot({
         shape: TB_SHAPES.blob,
+        expressions: TB_EXPRESSIONS,
         bodyFill: theme.body,
         eyeFill: theme.eye,
         size: BOT_SIZE,
@@ -429,15 +521,12 @@ function boot() {
         seenAt: undefined,
         consumed: probe.consumed,
         completionKey: display.completionKey,
-        dispose: null,
+        handle: null,
       }
       record.motionName = motionFor(record, display.phase, display.completionKey)
       inst.state = record.motionName
       stamp(record)
-      const stopBot = runBot(inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: reduce })
-      record.dispose = () => {
-        if (typeof stopBot === 'function') stopBot()
-      }
+      record.handle = runBot(inst, { reduced: reduce })
       record.reduceAtRun = reduce
       mounted.set(slot, record)
       records.add(record)
@@ -491,20 +580,26 @@ function boot() {
     return record
   }
 
-  /** 重新起动画循环（节点重新挂载后用）。 */
+  /**
+   * 重新起动画循环（节点重新挂载、或 reduced-motion 切换后用）。
+   *
+   * 先停旧的再起新的，**不把旧清理函数串进新清理函数** —— 那种写法每重启
+   * 一次就套一层，长时间运行会越积越深（清理会递归爆栈）。
+   */
   function restartBot(record) {
-    const stopBot = runBot(record.inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: reduce })
-    const previous = record.dispose
-    record.dispose = () => {
-      if (typeof stopBot === 'function') stopBot()
-      if (typeof previous === 'function') previous()
+    if (record.handle !== null && record.handle !== undefined && typeof record.handle.stop === 'function') {
+      record.handle.stop()
     }
+    record.handle = runBot(record.inst, { reduced: reduce })
+    record.reduceAtRun = reduce
   }
 
   /** 彻底拆掉一条记录：停动画、摘节点、清索引。 */
   function disposeRecord(record) {
-    if (typeof record.dispose === 'function') record.dispose()
-    record.dispose = null
+    if (record.handle !== null && record.handle !== undefined && typeof record.handle.stop === 'function') {
+      record.handle.stop()
+    }
+    record.handle = null
     if (record.inst.svg.parentNode !== null) record.inst.svg.remove()
     records.delete(record)
   }
@@ -567,9 +662,14 @@ function boot() {
       const entry = byId.get(surface.sessionId)
       const rawPhase = entry === undefined ? 'idle' : normalizePhaseInput(entry.phase)
       const nativeDone = nativeDoneSessions.has(surface.sessionId)
-      // 「真的活跃过」= 宿主说在跑（非 idle/done）
-      const activeEvidence = rawPhase === 'working' || rawPhase === 'thinking' || rawPhase === 'waiting' || rawPhase === 'blocked'
-      noteNativeCompletion(surface.sessionId, nativeDone, activeEvidence, Date.now())
+      // 「真的活跃过」有两个真实来源：
+      //   · 宿主快照说在跑（working / thinking / waiting / blocked）；
+      //   · DSH 自己画在行里的状态点走到 ongoing / warning —— 对**未知会话**
+      //     （state.json 里从来没有它）这是唯一证据，不能漏。
+      const hostActive = rawPhase === 'working' || rawPhase === 'thinking' || rawPhase === 'waiting' || rawPhase === 'blocked'
+      const nativeRaw = nativeStateById.get(surface.sessionId)
+      const nativeActive = nativeRaw === 'ongoing' || nativeRaw === 'warning'
+      noteNativeCompletion(surface.sessionId, nativeDone, hostActive || nativeActive, Date.now())
       const semantic = semanticOf(surface.sessionId)
       semantics.set(surface.sessionId, semantic)
 
@@ -1009,6 +1109,32 @@ function boot() {
 
   // ── 诊断 ────────────────────────────────────────────────────────────────
   /**
+   * 一帧里真正可见的图层。
+   *
+   * 校验「blocked 是感叹号」这类事实要看图层，不看动作名 —— 名字可以改，
+   * 图层不会骗人。
+   *
+   * @param {object} inst 头像实例。
+   * @returns {object} 各图层是否可见。
+   */
+  function layersOf(inst) {
+    const shown = (el) =>
+      el !== undefined && el !== null && (el.style === undefined || el.style.display !== 'none')
+    const dotsShown = shown(inst.dotsGroup)
+    return {
+      body: shown(inst.bodyGroup),
+      eyes: shown(inst.eyeGroup),
+      bang: shown(inst.bangGroup),
+      dots: dotsShown,
+      orbitsBack: shown(inst.orbitsBack),
+      orbitsFront: shown(inst.orbitsFront),
+      trail: shown(inst.trailGroup),
+      orbitPaths: inst.orbitsBack.children.length + inst.orbitsFront.children.length,
+      dotCount: dotsShown ? inst.dotEls.filter((el) => el.style === undefined || el.style.display !== 'none').length : 0,
+    }
+  }
+
+  /**
    * 采集一份结构化自检。
    *
    * 刻意**不**包含会话标题、正文、工具参数、路径或凭据 —— 只报结构性事实：
@@ -1037,6 +1163,9 @@ function boot() {
         reason: display.reason,
         renderedPhase: record !== undefined && record.inst.svg !== null ? record.inst.svg.getAttribute('data-dsgb-phase') : null,
         motion: record !== undefined && record.inst.svg !== null ? record.inst.svg.getAttribute('data-dsgb-motion') : null,
+        figure: record !== undefined && record.inst.svg !== null ? record.inst.svg.getAttribute('data-dsgb-figure') : null,
+        /** 这一帧里实际存在的图层（不是动作名）。 */
+        layers: record !== undefined && record.inst !== undefined ? layersOf(record.inst) : null,
         tone: record !== undefined && record.inst.svg !== null ? record.inst.svg.getAttribute('data-dsgb-tone') : null,
         completionKey: display.completionKey === '' ? null : display.completionKey,
         consumed: display.consumed === true,
@@ -1182,13 +1311,7 @@ function boot() {
         continue
       }
       if (record.reduceAtRun === reduce) continue
-      // 换一种运行方式：先停旧的，再按新模式起
-      if (typeof record.dispose === 'function') record.dispose()
-      const stopBot = runBot(record.inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: reduce })
-      record.dispose = () => {
-        if (typeof stopBot === 'function') stopBot()
-      }
-      record.reduceAtRun = reduce
+      restartBot(record)
     }
   }
   if (reduceQuery !== null && typeof reduceQuery.addEventListener === 'function') {

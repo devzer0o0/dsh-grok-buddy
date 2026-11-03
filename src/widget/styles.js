@@ -88,7 +88,9 @@ export function slotStyles(botClass, slotAttr, size, options) {
     cell + ' > [data-state]{display:none!important}',
     cell + ' > [class*="visuallyHidden"]{display:none!important}',
     // order:-1 兜底：前导位里万一还有别的标记，头像也永远是最左那个。
-    bot + '{order:-1;display:block;width:' + size + 'px;height:' + size + 'px;flex:none}',
+    // 轨道/拖尾要能画到头像本体之外，但又不能溢出 16px 格子去压标题：
+    // 画布本身就是 1.5× 身体直径，轨迹已经收在里面，所以这里只要不裁切即可。
+    bot + '{order:-1;display:block;width:' + size + 'px;height:' + size + 'px;flex:none;overflow:visible}',
   ]
   if (opts.reduce === true) {
     // 减少动效：不缩放、不淡入，只留可区分的静态姿态（姿态由引擎按状态选表情）

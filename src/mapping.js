@@ -5,12 +5,12 @@
  *
  *   idle · working · waiting · blocked · thinking · done
  *
- * 动作预设（motionPreset，内部动画资源标识）是另一层：
- * 它是 GrokBot 素材库里的名字（idle / working / bored / alerting / thinking /
- * celebrate），可以在内部换、可以加，但**不是**插件对外暴露的状态数量。
+ * 动作（motion，内部动画资源标识）是另一层，现在由 src/grokbot/motion.js 定义：
+ * rest / spin / half-lidded / bang / tri-dot / orbit。它们是**动作**，不是状态；
+ * 可以在内部换名、加过渡，但插件对外永远只有六个状态。
  *
- * 表情素材（expression）是又一层：25 张眼型，按状态的动作池取用。
- * 所以「动作预设库有多少条」不等于「插件有多少种状态」，
+ * 表情素材（expression）是又一层：25 张眼型，只服务 idle / working / done 的
+ * 眼睛造型。所以「素材库有多少条」不等于「插件有多少种状态」，
  * 「表情图里有哪些名字」也不等于运行状态。
  *
  * @module dsh-grok-buddy/mapping
@@ -42,24 +42,24 @@ export const PHASE_TO_LIFECYCLE = Object.freeze({
 })
 
 /**
- * 状态 → **动作预设名**（内部动画资源，不是公开状态）。
+ * 状态 → **动作**（内部动画资源，不是公开状态）。
  *
- *   idle      平静地眨眼，节奏最慢
- *   thinking  眼珠游移、换脸较快（模型请求 / 推理 / 生成阶段）
- *   working   专注，节奏最快（**只有工具在执行**才用）
- *   waiting   等得有点无聊，慢吞吞（审批、提问、计划评审）
- *   blocked   定住不眨眼，一看就不对劲（有效错误）
- *   done      持续庆祝（活跃期内一直播，不做固定时长回落）
+ *   idle      rest         安静：自然视线、眨眼与轻微姿态变化
+ *   working   spin         转身 + 进入时一道短暂彩色拖尾（只有工具在执行才用）
+ *   waiting   half-lidded  半闭横线眼，低活动度的等待姿态
+ *   blocked   bang         头像退出，主体是感叹号
+ *   thinking  tri-dot      头像退出，三颗横点依次脉动
+ *   done      orbit        头像旋转 + 多条彩色轨道环绕（活跃期内持续，不回落）
  *
  * 颜色不参与状态表达：一只 Bot 的颜色是它的**项目身份**，六态同色。
  */
 export const PHASE_TO_MOTION = Object.freeze({
-  idle: 'idle',
-  thinking: 'thinking',
-  working: 'working',
-  waiting: 'bored',
-  blocked: 'alerting',
-  done: 'celebrate',
+  idle: 'rest',
+  thinking: 'tri-dot',
+  working: 'spin',
+  waiting: 'half-lidded',
+  blocked: 'bang',
+  done: 'orbit',
 })
 
 /** 兼容导出：旧名字指向同一张表（对外仍只表达六态）。 */

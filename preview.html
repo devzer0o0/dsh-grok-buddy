@@ -1,116 +1,435 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<title>dsh-grok-buddy · GrokBot 状态头像</title>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-grok-buddy · 六态动作对照台</title>
 <style>
- :root{--bg:#131417;--panel:#1b1d22;--line:rgba(255,255,255,.07);--text:#e8e8ea;--muted:#8b93a1}
- *{box-sizing:border-box}
- body{margin:0;padding:26px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"PingFang SC",sans-serif}
- h1{font-size:19px;margin:0 0 4px}
- .sub{color:var(--muted);font-size:13px;margin:0 0 22px;max-width:780px}
- h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:26px 0 10px;font-weight:600}
- .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
- .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
- .name{font-size:12.5px;font-weight:600}
- .key{font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
- .rows{display:flex;flex-direction:column;gap:1px;max-width:340px}
- .demo-row{display:flex;align-items:center;height:32px;padding:0 8px;border-radius:8px;font-size:14px;cursor:default}
- .demo-row:hover{background:rgba(127,127,127,.14)}
- .t{margin:0 6px 0 4px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .tm{color:var(--muted);font-size:10px;flex:none}
- .slot{width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
-</style></head><body>
-<h1>dsh-grok-buddy · GrokBot 状态头像</h1>
-<p class="sub">头像按官方 GrokBot 几何重建：眼睛是贴在球面上的多边形，转头时会透视变形、转到背面消失；表情切换是弹簧形变，还带随机眨眼。运行状态只有六个（Idle / Working / Waiting / Blocked / Thinking / Done），直接画在头像上；颜色表示**项目身份**，六态同色，变的全是动作。</p>
-<h2>六种运行状态</h2>
-<div class="grid" id="big"></div>
-<h2>1:1 · 侧栏实际大小</h2>
-<div class="grid" id="small"></div>
-<h2>放进会话列表</h2>
-<div class="rows" id="rows"></div>
+  :root { --bg:#131417; --panel:#1b1d22; --line:rgba(255,255,255,.08); --text:#e8e8ea; --muted:#8b93a1; --on:#1084fe }
+  body.light { --bg:#f4f5f7; --panel:#ffffff; --line:rgba(0,0,0,.09); --text:#1f2328; --muted:#6b7280 }
+  *{box-sizing:border-box}
+  body{margin:0;padding:22px 24px 40px;background:var(--bg);color:var(--text);font:13px/1.55 -apple-system,"PingFang SC",sans-serif}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:12px;margin:0 0 18px;max-width:920px}
+  h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:22px 0 10px;font-weight:600}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer}
+  button:hover{border-color:var(--on)}
+  button.on{background:var(--on);border-color:var(--on);color:#fff}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .cell{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .box{display:flex;align-items:center;justify-content:center}
+  .cap{font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+  .row{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.65}
+  table{border-collapse:collapse;font-size:11.5px;width:100%}
+  th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .ref{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+  .ref img{width:320px;border-radius:10px;border:1px solid var(--line);background:#14161a}
+  .live{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);white-space:pre-line}
+</style>
+</head>
+<body>
+<h1>dsh-grok-buddy · 六态动作对照台</h1>
+<p class="sub">
+  这个页面用的是<strong>产品同一个渲染器</strong>：<code>src/grokbot/motion.js</code> 采样、
+  <code>src/grokbot/engine.js</code> 绘制。没有第二套「只用于演示」的动画 —— 改这里就等于改侧栏。
+</p>
 
-<script>
-window.__GROK_BUDDY_DEMO__ = {
-  now: Date.now(),
-  sessions: [
-    { id: 'd0', phase: 'idle', detail: '' },
-    { id: 'd1', phase: 'thinking', detail: 'step 2' },
-    { id: 'd2', phase: 'working', detail: '' },
-    { id: 'd3', phase: 'working', detail: 'bash' },
-    { id: 'd4', phase: 'waiting', detail: 'write' },
-    { id: 'd5', phase: 'blocked', detail: 'RATE_LIMIT / 2' },
-    { id: 'd6', phase: 'blocked', detail: 'QUOTA' },
-    { id: 'd7', phase: 'done', detail: '' }
-  ]
-};
-const realFetch = window.fetch;
-window.fetch = function (url, opts) {
-  if (String(url).indexOf('/dsh-grok-buddy/state.json') !== -1) {
-    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+<div class="bar">
+  <strong style="font-size:12px">动作</strong>
+  <span id="phaseBtns"></span>
+</div>
+<div class="bar">
+  <strong style="font-size:12px">播放</strong>
+  <button id="playBtn" class="on">暂停</button>
+  <button id="stepBtn">步进 16ms</button>
+  <button id="stepBigBtn">步进 100ms</button>
+  <strong style="font-size:12px;margin-left:10px">速度</strong>
+  <button id="speed1" class="on">1×</button>
+  <button id="speed025">0.25×</button>
+</div>
+<div class="bar">
+  <strong style="font-size:12px">配色</strong>
+  <button id="inkProject" class="on">项目色 #1084FE</button>
+  <button id="inkWhite">白（对齐参考）</button>
+  <strong style="font-size:12px;margin-left:10px">背景</strong>
+  <button id="bgDark" class="on">深色</button>
+  <button id="bgLight">浅色</button>
+  <strong style="font-size:12px;margin-left:10px">其他</strong>
+  <button id="reducedBtn">reduced-motion 关</button>
+  <button id="replayBtn">重送同态快照</button>
+</div>
+
+<h2>参考 vs 实现（同一动作、同一尺度）</h2>
+<div class="panel ref">
+  <div class="cell">
+    <img id="refImg" alt="参考录屏里该动作的一帧" src="./docs/reference-idle.png">
+    <span class="cap" id="refCap">参考（录屏截图）</span>
+  </div>
+  <div class="cell">
+    <div class="box" id="stageHero" style="width:200px;height:200px"></div>
+    <span class="cap" id="heroCap">实现 200px</span>
+  </div>
+  <div style="flex:1;min-width:240px">
+    <div class="live" id="liveInfo"></div>
+    <p class="hint">
+      参考帧来自用户提供的录屏 <code>reference-six-states.gif</code>（800×396 / 1397 帧 / 28.26s）。
+      录屏里的鼠标、播放按钮、六态标签、进度条都已裁掉 —— 它们不是头像的一部分。
+      图片只作视觉对照，产品里跑的是矢量动画，不是 GIF 贴图。
+    </p>
+  </div>
+</div>
+
+<h2>三档真实尺寸（16px 才是验收主体）</h2>
+<div class="panel">
+  <div class="row" id="sizes"></div>
+  <p class="hint">
+    64px 看轨迹与层次，32px 看缩放是否合理，16px 看侧栏里到底认不认得出来。
+    画布是 1.5× 身体直径，轨道收在里面，所以 16px 下不会被格子裁掉。
+  </p>
+</div>
+
+<h2>六态并排（同一项目色、同一时刻）</h2>
+<div class="panel"><div class="row" id="allSix"></div></div>
+
+<h2>任意切换（不是 GIF 里的固定顺序）</h2>
+<div class="panel">
+  <div class="row" id="switchRow"></div>
+  <p class="hint">
+    每一对都是真实可能出现的跳转（idle→thinking、thinking→working、working→done、
+    done→thinking …）。过渡由 <code>TRANSITION_MS</code> 控制，旧图形不会残留。
+  </p>
+</div>
+
+<h2>动作规格（实时读 motion.js 的表）</h2>
+<div class="panel"><table id="specTable"></table></div>
+
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES } from './src/grokbot/data.js'
+import { createBot, runBot, setBotInk } from './src/grokbot/engine.js'
+import { MOTION_BY_ID, MOTION_SPEC, transitionOf } from './src/grokbot/motion.js'
+import { PHASE_TO_MOTION } from './src/mapping.js'
+
+const PHASES = ['idle', 'working', 'waiting', 'blocked', 'thinking', 'done']
+const LABEL = { idle: '空闲', working: '正在处理', waiting: '正在等待', blocked: '已阻止', thinking: '思考', done: '完成' }
+const REF_IMAGE = {
+  idle: './docs/reference-idle.png',
+  working: './docs/reference-working.png',
+  waiting: './docs/reference-waiting.png',
+  blocked: './docs/reference-blocked.png',
+  thinking: './docs/reference-thinking.png',
+  done: './docs/reference-done.png',
+}
+
+const state = {
+  phase: 'idle',
+  playing: true,
+  speed: 1,
+  ink: '#1084fe',
+  inkMode: 'project',
+  dark: true,
+  reduced: false,
+}
+
+/** 所有活着的实例：{ inst, handle, motion, t0 }。 */
+const live = []
+
+function palette() {
+  const body = state.inkMode === 'white' ? '#ffffff' : state.ink
+  const eye = state.dark ? '#14161a' : '#ffffff'
+  return { body, eye }
+}
+
+/**
+ * 建一个实例并挂进容器。用的是产品同一个 createBot + runBot。
+ * @param {HTMLElement} holder 容器。
+ * @param {number} size 像素。
+ * @param {string} motion 动作 id。
+ * @param {object} [opts] { paused, reduce }
+ */
+function spawn(holder, size, motion, opts) {
+  const o = opts || {}
+  const theme = palette()
+  const inst = createBot({ shape: TB_SHAPES.blob, expressions: TB_EXPRESSIONS, bodyFill: theme.body, eyeFill: theme.eye, size })
+  inst.state = motion
+  holder.appendChild(inst.svg)
+  let t = o.time === undefined ? 0 : o.time
+  const handle = runBot(inst, {
+    reduced: o.reduce === true,
+    // 预览自己掌控时钟：暂停就是真的不推进，步进就是精确跳一段时间
+    now: () => t,
+    raf: (cb) => (o.reduce === true ? 0 : requestAnimationFrame(cb)),
+    cancelRaf: (id) => { if (id) cancelAnimationFrame(id) },
+  })
+  const record = { inst, handle, motion, holder, size, reduce: o.reduce === true, get t() { return t }, set t(v) { t = v } }
+  live.push(record)
+  return record
+}
+
+function clearAll() {
+  for (const record of live) {
+    if (record.handle && typeof record.handle.stop === 'function') record.handle.stop()
+    if (record.inst.svg.parentNode !== null) record.inst.svg.parentNode.removeChild(record.inst.svg)
   }
-  return realFetch.call(this, url, opts);
-};
-</script>
-<script src="./lib/widget.js"></script>
-<script>
-(function () {
-  const MAP = [
-    ['空闲', 'idle', 'd0'], ['思考', 'thinking', 'd1'], ['正在处理', 'working', 'd2'],
-    ['正在等待', 'waiting', 'd4'], ['已阻止', 'blocked', 'd6'], ['完成', 'done', 'd7']
-  ];
-  function rowFor(id, title, meta) {
-    const row = document.createElement('div');
-    row.className = 'demo-row';
-    row.setAttribute('data-row-key', 'session:' + id);
-    const slot = document.createElement('span');
-    slot.className = 'slot';
-    const dot = document.createElement('span');
-    dot.setAttribute('data-state', 'idle');
-    dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#555';
-    slot.appendChild(dot);
-    row.appendChild(slot);
-    if (title !== '') {
-      const t = document.createElement('span'); t.className = 't'; t.textContent = title;
-      const tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = meta;
-      row.appendChild(t); row.appendChild(tm);
+  live.length = 0
+}
+
+function repaintInk() {
+  const theme = palette()
+  for (const record of live) setBotInk(record.inst, theme.body, theme.eye)
+}
+
+// ── 顶部：当前动作 ────────────────────────────────────────────────────────
+const phaseBtns = document.getElementById('phaseBtns')
+for (const phase of PHASES) {
+  const btn = document.createElement('button')
+  btn.textContent = LABEL[phase] + ' · ' + PHASE_TO_MOTION[phase]
+  btn.dataset.phase = phase
+  btn.addEventListener('click', () => selectPhase(phase))
+  phaseBtns.appendChild(btn)
+}
+
+function selectPhase(phase) {
+  state.phase = phase
+  for (const btn of phaseBtns.children) btn.classList.toggle('on', btn.dataset.phase === phase)
+  rebuild()
+}
+
+// ── 各部分建筑 ────────────────────────────────────────────────────────────
+const stageHero = document.getElementById('stageHero')
+const sizesRow = document.getElementById('sizes')
+const allSix = document.getElementById('allSix')
+const switchRow = document.getElementById('switchRow')
+const liveInfo = document.getElementById('liveInfo')
+const refImg = document.getElementById('refImg')
+const refCap = document.getElementById('refCap')
+
+const SWITCH_PAIRS = [
+  ['idle', 'thinking'], ['thinking', 'working'], ['working', 'thinking'], ['working', 'waiting'],
+  ['waiting', 'working'], ['thinking', 'blocked'], ['blocked', 'thinking'], ['working', 'done'],
+  ['thinking', 'done'], ['done', 'thinking'], ['done', 'idle'],
+]
+
+function rebuild() {
+  clearAll()
+  const motion = PHASE_TO_MOTION[state.phase]
+  refImg.src = REF_IMAGE[state.phase]
+  refCap.textContent = '参考 · ' + LABEL[state.phase] + '（' + state.phase + '）'
+
+  // 主角
+  stageHero.textContent = ''
+  spawn(stageHero, 200, motion, { reduce: state.reduced })
+
+  // 三档尺寸
+  sizesRow.textContent = ''
+  for (const size of [64, 32, 16]) {
+    const cell = document.createElement('div')
+    cell.className = 'cell'
+    const box = document.createElement('div')
+    box.className = 'box'
+    // 把 16px 的那一档按 DPR 放大浏览器缩放不影响布局，但便于肉眼核对
+    box.style.width = size + 'px'
+    box.style.height = size + 'px'
+    cell.appendChild(box)
+    const cap = document.createElement('div')
+    cap.className = 'cap'
+    cap.textContent = size + 'px'
+    cell.appendChild(cap)
+    sizesRow.appendChild(cell)
+    spawn(box, size, motion, { reduce: state.reduced })
+  }
+
+  // 六态并排
+  allSix.textContent = ''
+  for (const phase of PHASES) {
+    const cell = document.createElement('div')
+    cell.className = 'cell'
+    const box = document.createElement('div')
+    box.className = 'box'
+    box.style.width = '48px'
+    box.style.height = '48px'
+    cell.appendChild(box)
+    const cap = document.createElement('div')
+    cap.className = 'cap'
+    cap.textContent = LABEL[phase]
+    cell.appendChild(cap)
+    allSix.appendChild(cell)
+    spawn(box, 48, PHASE_TO_MOTION[phase], { reduce: state.reduced })
+  }
+
+  // 任意切换：每对各自一个实例，从 A 切到 B，循环演示过渡
+  switchRow.textContent = ''
+  for (const [from, to] of SWITCH_PAIRS) {
+    const cell = document.createElement('div')
+    cell.className = 'cell'
+    const box = document.createElement('div')
+    box.className = 'box'
+    box.style.width = '48px'
+    box.style.height = '48px'
+    cell.appendChild(box)
+    const cap = document.createElement('div')
+    cap.className = 'cap'
+    cap.textContent = from + '→' + to
+    cell.appendChild(cap)
+    switchRow.appendChild(cell)
+    const record = spawn(box, 48, PHASE_TO_MOTION[from], { reduce: state.reduced })
+    record.pair = [from, to]
+    record.legAt = 0
+  }
+
+  updateInfo()
+}
+
+function updateInfo() {
+  const motion = PHASE_TO_MOTION[state.phase]
+  const spec = MOTION_BY_ID[motion]
+  liveInfo.textContent =
+    'phase      ' + state.phase + '  (' + LABEL[state.phase] + ')\n' +
+    'motion     ' + motion + '\n' +
+    'figure     ' + (spec.kind === 'symbol' ? '符号（无头像）' : '头像') + '\n' +
+    'speed      ' + state.speed + '×\n' +
+    'reduced    ' + state.reduced + '\n' +
+    'ink        ' + (state.inkMode === 'white' ? '#ffffff（参考模式）' : state.ink)
+}
+
+// ── 播放控制 ──────────────────────────────────────────────────────────────
+const playBtn = document.getElementById('playBtn')
+const speed1 = document.getElementById('speed1')
+const speed025 = document.getElementById('speed025')
+
+playBtn.addEventListener('click', () => {
+  state.playing = !state.playing
+  playBtn.classList.toggle('on', state.playing)
+  playBtn.textContent = state.playing ? '暂停' : '播放'
+})
+
+function setSpeed(value) {
+  state.speed = value
+  speed1.classList.toggle('on', value === 1)
+  speed025.classList.toggle('on', value === 0.25)
+  updateInfo()
+}
+speed1.addEventListener('click', () => setSpeed(1))
+speed025.addEventListener('click', () => setSpeed(0.25))
+
+function step(ms) {
+  for (const record of live) {
+    record.t = record.t + ms
+    if (record.handle && typeof record.handle.step === 'function') record.handle.step(record.t)
+  }
+  updateInfo()
+}
+document.getElementById('stepBtn').addEventListener('click', () => step(16))
+document.getElementById('stepBigBtn').addEventListener('click', () => step(100))
+
+// 主循环：只推进时间，不碰业务状态
+let last = 0
+function frame(ts) {
+  requestAnimationFrame(frame)
+  const dt = last === 0 ? 16 : Math.min(ts - last, 64)
+  last = ts
+  if (!state.playing) return
+  const delta = dt * state.speed
+  for (const record of live) {
+    if (record.reduce) continue
+    record.t = record.t + delta
+    if (record.handle && typeof record.handle.step === 'function') record.handle.step(record.t)
+    // 任意切换那一组：A 跑 1.6s → 切 B → 再 1.6s 切回来
+    if (record.pair !== undefined) {
+      record.legAt = record.legAt + delta
+      if (record.legAt > 1600) {
+        record.legAt = 0
+        const next = record.inst.state === PHASE_TO_MOTION[record.pair[0]]
+          ? PHASE_TO_MOTION[record.pair[1]]
+          : PHASE_TO_MOTION[record.pair[0]]
+        if (record.inst.state !== next) {
+          record.inst.state = next
+          record.inst.token += 1
+        }
+      }
     }
-    return row;
   }
+}
 
-  const big = document.getElementById('big');
-  for (const item of MAP) {
-    const card = document.createElement('div'); card.className = 'card';
-    const holder = document.createElement('div');
-    holder.style.cssText = 'width:54px;height:54px;display:flex;align-items:center;justify-content:center';
-    holder.appendChild(rowFor(item[2], '', ''));
-    card.appendChild(holder);
-    const n = document.createElement('div'); n.className = 'name'; n.textContent = item[0];
-    const k = document.createElement('div'); k.className = 'key'; k.textContent = item[1];
-    card.appendChild(n); card.appendChild(k);
-    big.appendChild(card);
+// ── 配色 / 背景 / 偏好 ─────────────────────────────────────────────────────
+document.getElementById('inkProject').addEventListener('click', () => {
+  state.inkMode = 'project'
+  document.getElementById('inkProject').classList.add('on')
+  document.getElementById('inkWhite').classList.remove('on')
+  repaintInk(); updateInfo()
+})
+document.getElementById('inkWhite').addEventListener('click', () => {
+  state.inkMode = 'white'
+  document.getElementById('inkWhite').classList.add('on')
+  document.getElementById('inkProject').classList.remove('on')
+  repaintInk(); updateInfo()
+})
+document.getElementById('bgDark').addEventListener('click', () => {
+  state.dark = true
+  document.body.classList.remove('light')
+  document.getElementById('bgDark').classList.add('on')
+  document.getElementById('bgLight').classList.remove('on')
+  rebuild()
+})
+document.getElementById('bgLight').addEventListener('click', () => {
+  state.dark = false
+  document.body.classList.add('light')
+  document.getElementById('bgLight').classList.add('on')
+  document.getElementById('bgDark').classList.remove('on')
+  rebuild()
+})
+document.getElementById('reducedBtn').addEventListener('click', (event) => {
+  state.reduced = !state.reduced
+  event.currentTarget.textContent = 'reduced-motion ' + (state.reduced ? '开' : '关')
+  event.currentTarget.classList.toggle('on', state.reduced)
+  rebuild()
+})
+document.getElementById('replayBtn').addEventListener('click', () => {
+  // 同态快照重复到达：只重置动作 id（相同 → 不递增 token），动画时钟继续
+  for (const record of live) {
+    const same = record.inst.state === PHASE_TO_MOTION[state.phase]
+    record.inst.state = PHASE_TO_MOTION[state.phase]
+    if (!same) record.inst.token += 1
   }
+})
 
-  const small = document.getElementById('small');
-  for (const item of MAP) {
-    const card = document.createElement('div'); card.className = 'card';
-    card.style.padding = '10px 12px';
-    card.appendChild(rowFor(item[2], item[0], item[1]));
-    small.appendChild(card);
+// ── 规格表 ────────────────────────────────────────────────────────────────
+const specTable = document.getElementById('specTable')
+const ROWS = [
+  ['动作', '图形', '进入', '持续 / 循环', '关键量测'],
+  ['rest / idle', '头像 + 竖眼', '—', '慢张望 5.6s、眨眼 4.8s', '眼对中点 -0.25D..+0.15D'],
+  ['spin / working', '头像 + 短拖尾', '甩头 760ms，拖尾 1.2s', '左右张望 2.6s', '拖尾半径 0.66D、弧 1.9rad'],
+  ['half-lidded / waiting', '头像 + 横线眼', '420ms', '呼吸 4.2s', '眼 0.175D×0.065D，倾角 +12°/+14°'],
+  ['bang / blocked', '感叹号', '480ms 收缩形变', '完全静止（参考逐帧一致）', '条 0.146D、点 0.121D、间距 0.16D'],
+  ['tri-dot / thinking', '三颗横点', '320ms 摊开', '脉动 1.4s，相位差 1/3', '点径 0.165D、间距 0.272D'],
+  ['orbit / done', '头像 + 6 条轨道', '420ms 长回', '持续，轨道 6 种速度/倾角', '半径 0.58–0.70D、线宽 0.068D'],
+]
+for (const [i, row] of ROWS.entries()) {
+  const tr = document.createElement('tr')
+  for (const cell of row) {
+    const td = document.createElement(i === 0 ? 'th' : 'td')
+    td.textContent = cell
+    tr.appendChild(td)
   }
+  specTable.appendChild(tr)
+}
 
-  const rows = document.getElementById('rows');
-  const demos = [
-    ['d1', 'Grok 头像', '思考中'], ['d3', 'dsh-tps', '执行工具'],
-    ['d4', '插件适配 dsh', '等你确认'], ['d6', 'PiliPlus', '失败'],
-    ['d7', '修复 BiliSail', '刚完成'], ['d5', '未命名', '重试中'],
-    ['d0', '会话', '安静']
-  ];
-  for (const d of demos) rows.appendChild(rowFor(d[0], d[1], d[2]));
+selectPhase('idle')
+requestAnimationFrame(frame)
 
-  setInterval(function () {
-    document.querySelectorAll('#big svg').forEach(function (svg) {
-      svg.setAttribute('width', '54'); svg.setAttribute('height', '54');
-    });
-  }, 100);
-})();
+// 暴露给自动化核对
+window.__preview = {
+  state,
+  live,
+  selectPhase,
+  step,
+  transitions: () => Object.fromEntries(
+    Object.keys(MOTION_BY_ID).map((a) => [a, Object.fromEntries(Object.keys(MOTION_BY_ID).map((b) => [b, transitionOf(a, b)]))]),
+  ),
+  spec: MOTION_SPEC,
+}
 </script>
-</body></html>
+</body>
+</html>

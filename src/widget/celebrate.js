@@ -5,7 +5,7 @@
  *   「活跃时持续庆祝；查看并切走或失活后变为灰色 idle。」
  *
  * 所以这里没有固定时长，也不再往 proud/idle 回落：
- *   · displayPhase === done  → 始终 celebrate（不重启、不重置相位起点）；
+ *   · displayPhase === done  → 始终 orbit（不重启、不重置相位起点）；
  *   · 离开 done              → 立刻离开完成动作，并把记忆清空；
  *   · 同一 completionKey 的完成周期只初始化一次 —— 轮询再多次也不会重启动画。
  *
@@ -15,8 +15,8 @@
  * @module dsh-grok-buddy/celebrate
  */
 
-/** 稳定动作名（内部动画预设标识，**不是**运行状态）。 */
-export const CELEBRATE_MOTION = 'celebrate'
+/** 稳定动作名（内部动画标识，**不是**运行状态）。与 src/grokbot/motion.js 的 orbit 一致。 */
+export const CELEBRATE_MOTION = 'orbit'
 
 /** 一张干净的记忆：没有正在进行的完成周期。 */
 export function freshMemory() {

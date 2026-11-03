@@ -18,6 +18,9 @@ import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { Doc, jsonResponse } from './dom-harness.mjs'
 
+/** idle 的动作 id（内部动画资源名）。 */
+const IDLE_MOTION = 'rest'
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SOURCE = fs.readFileSync(path.join(HERE, '..', 'lib', 'widget.js'), 'utf8')
 
@@ -221,6 +224,12 @@ function makeRow(doc, section, sessionId, selected, dshState) {
   return { row, slot, dot }
 }
 
+/** 取眼睛图层（按图层标记找，不依赖子节点序号）。 */
+function eyeLayer(bot) {
+  const group = bot.querySelector('[data-dsgb-layer="eyes"]')
+  return group === null ? null : group.children[0]
+}
+
 function botOf(slot) {
   return slot.children.find((c) => String(c.getAttribute('class') || '').indexOf('dsgb-bot') !== -1)
 }
@@ -257,13 +266,13 @@ test('A1 done 持续选中时，多次同步始终是 done/celebrate', async () 
   h.setState({ ok: true, sessions: [DONE_ROW('s1', 's1#1', completedAt)] })
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'done', '第一次同步是 done')
-  assert.equal(motionOf(made.slot), 'celebrate')
+  assert.equal(motionOf(made.slot), 'orbit')
 
   // 保持选中，连续多轮同步
   for (let i = 0; i < 6; i++) {
     await h.advance(600)
     assert.equal(phaseOf(made.slot), 'done', '第 ' + (i + 2) + ' 次同步仍是 done')
-    assert.equal(motionOf(made.slot), 'celebrate')
+    assert.equal(motionOf(made.slot), 'orbit')
   }
 })
 
@@ -278,7 +287,7 @@ test('A2 查看后切走才消费：切走后为 idle 且灰色', async () => {
   made.row.setAttribute('aria-selected', 'false')
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'idle', '切走后退出完成展示')
-  assert.equal(motionOf(made.slot), 'idle', '不再是 celebrate')
+  assert.equal(motionOf(made.slot), IDLE_MOTION, '不再是 celebrate')
   assert.equal(toneOf(made.slot), 'dormant', '未选中 → 灰色')
 })
 
@@ -334,7 +343,7 @@ test('C1 未选中 done 超过失活阈值 → idle（不只是变灰）', async
   })
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'idle', '失活后相位必须是 idle')
-  assert.equal(motionOf(made.slot), 'idle', '失活后不能继续 celebrate')
+  assert.equal(motionOf(made.slot), IDLE_MOTION, '失活后不能继续 celebrate')
 })
 
 test('C2 宿主已失活但 DOM 仍画 done：不能灰色庆祝', async () => {
@@ -348,7 +357,7 @@ test('C2 宿主已失活但 DOM 仍画 done：不能灰色庆祝', async () => {
   })
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'idle', 'DOM done 不得覆盖���失活结论')
-  assert.equal(motionOf(made.slot), 'idle')
+  assert.equal(motionOf(made.slot), IDLE_MOTION)
 })
 
 test('C3 未知会话的 DOM done 超时后必须退出 done', async () => {
@@ -362,7 +371,7 @@ test('C3 未知会话的 DOM done 超时后必须退出 done', async () => {
   // 越过完成展示阈值
   await h.advance(5 * 60 * 1000 + 2000)
   assert.equal(phaseOf(made.slot), 'idle', '未知会话的兜底完成也必须失活')
-  assert.equal(motionOf(made.slot), 'idle', '不能继续庆祝')
+  assert.equal(motionOf(made.slot), IDLE_MOTION, '不能继续庆祝')
 })
 
 test('D1 known idle 会话 + DOM done（无完成键）也能进入并退出完成周期', async () => {
@@ -389,7 +398,7 @@ test('D2 unknown done → 消费 → ongoing → done：第二次完成重新庆
   h.setState({ ok: true, sessions: [] })
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'done')
-  assert.equal(motionOf(made.slot), 'celebrate')
+  assert.equal(motionOf(made.slot), 'orbit')
 
   // 选中查看后切走 → 消费
   made.row.setAttribute('aria-selected', 'true')
@@ -408,7 +417,7 @@ test('D2 unknown done → 消费 → ongoing → done：第二次完成重新庆
   h.setState({ ok: true, sessions: [] })
   await h.advance(600)
   assert.equal(phaseOf(made.slot), 'done', '新一轮完成必须建立新周期')
-  assert.equal(motionOf(made.slot), 'celebrate', '新周期要重新庆祝')
+  assert.equal(motionOf(made.slot), 'orbit', '新周期要重新庆祝')
 })
 
 test('D3 DOM 摘除后重新挂载不制造新完成周期', async () => {
@@ -444,7 +453,7 @@ test('完成周期的关键时间点：2.6s / 3s / 6s / 30s 都保持 celebrate'
   for (const wait of [2600, 400, 3000, 24000]) {
     await h.advance(wait)
     assert.equal(phaseOf(made.slot), 'done', wait + 'ms 后仍是 done')
-    assert.equal(motionOf(made.slot), 'celebrate', wait + 'ms 后仍在庆祝')
+    assert.equal(motionOf(made.slot), 'orbit', wait + 'ms 后仍在庆祝')
   }
 })
 
@@ -456,7 +465,7 @@ test('同一完成周期只初始化一次：连续同步不重复初始化', as
   await h.advance(600)
   const bot = botOf(made.slot)
   await h.frame(3)
-  const eye = bot.children[0].children[2].children[0]
+  const eye = eyeLayer(bot)
   const before = eye.getAttribute('points')
   // 多轮同步 + 多帧，动画应继续演进而不是回到初值
   for (let i = 0; i < 6; i++) {
@@ -465,5 +474,84 @@ test('同一完成周期只初始化一次：连续同步不重复初始化', as
   }
   const after = eye.getAttribute('points')
   assert.notEqual(before, after, '动画应继续演进（未被重启）')
-  assert.equal(motionOf(made.slot), 'celebrate')
+  assert.equal(motionOf(made.slot), 'orbit')
+})
+
+// ── 完成身份衔接：兜底身份 ↔ 宿主 completionKey 不能算两次完成 ────────────────
+
+test('E1 兜底身份 → 宿主 completionKey：同一次完成不重播入场', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, section, 'unknown-1', false, 'done')
+  // 第一份快照里根本没有这个会话：只有 DOM 的 done → 兜底身份
+  h.setState({ ok: true, sessions: [] })
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done', '未知会话的 DOM done 也要庆祝')
+  assert.equal(motionOf(made.slot), 'orbit')
+  const before = h.api.completions()
+  const keyBefore = before.length === 0 ? null : before[0].completionKey
+  assert.ok(keyBefore !== null && keyBefore.indexOf('native:') === 0, '第一次用兜底身份：' + keyBefore)
+
+  // 第二份快照宿主补上了 completionKey：同一次完成，不能重播
+  h.setState({ ok: true, sessions: [DONE_ROW('unknown-1', 'unknown-1#3', h.now)] })
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done')
+  const after = h.api.completions()
+  assert.equal(after.length, 1, '不能变成两条完成记录：' + JSON.stringify(after.map((x) => x.completionKey)))
+  assert.equal(after[0].completionKey, 'unknown-1#3', '身份归并到权威键上')
+})
+
+test('E2 宿主 completionKey → 快照暂时缺失：退回兜底身份也不重播', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, section, 's1', false, 'done')
+  h.setState({ ok: true, sessions: [DONE_ROW('s1', 's1#4', h.now)] })
+  await h.advance(600)
+  assert.equal(motionOf(made.slot), 'orbit')
+  // 快照里这一行暂时缺字段（宿主重启/网络抖动），只剩 DOM 的 done
+  h.setState({ ok: true, sessions: [] })
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done', '同一次完成仍然有效')
+  assert.equal(h.api.completions().length, 1, '不能因为换了身份就多出一条完成记录')
+})
+
+test('E3 真的换了 completionKey 才算新的完成周期', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, section, 's1', true)
+  h.setState({ ok: true, sessions: [DONE_ROW('s1', 's1#5', h.now)] })
+  await h.advance(600)
+  assert.equal(h.api.completions().length, 1)
+  // 切走：消费掉这一次
+  made.row.setAttribute('aria-selected', 'false')
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'idle', '切走后消费')
+  // 新一轮完成：新的 completionKey
+  h.setState({ ok: true, sessions: [DONE_ROW('s1', 's1#6', h.now)] })
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done', '新一轮完成要重新庆祝')
+  assert.equal(motionOf(made.slot), 'orbit')
+  assert.equal(h.api.completions().length, 2, '两次完成是两条记录')
+})
+
+test('E4 未知会话：原生 done → 查看切走 → ongoing → done：第二次完成重新庆祝', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  // state.json **始终不包含**这个会话（未知会话的真实条件）
+  const made = makeRow(h.doc, section, 'ghost', true, 'done')
+  h.setState({ ok: true, sessions: [] })
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done', '第一次完成')
+  // 查看并切走 → 消费
+  made.row.setAttribute('aria-selected', 'false')
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'idle', '切走后退出完成展示')
+  // 原生状态变成 ongoing（真实新一轮开始）
+  made.dot.setAttribute('data-state', 'ongoing')
+  await h.advance(600)
+  // 再完成：必须是新的完成周期
+  made.dot.setAttribute('data-state', 'done')
+  await h.advance(600)
+  assert.equal(phaseOf(made.slot), 'done', '第二次完成要重新庆祝')
+  assert.equal(motionOf(made.slot), 'orbit')
 })

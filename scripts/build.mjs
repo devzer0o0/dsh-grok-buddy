@@ -38,14 +38,18 @@ function load(file) {
     }
     return ''
   })
-  // 去掉残留的 import 行（模块已按顺序内联）
-  code = code.replace(/^import\s+[^\n]*$/gm, '')
+  // 去掉残留的 import（模块已按顺序内联）。
+  // 必须支持多行写法 —— 单行正则漏掉 `{\n  A,\n}` 就会把半截 import 打进产物，
+  // 整个 IIFE 直接语法错误（真踩过）。
+  code = code.replace(/^import\s+[\s\S]*?from\s*['"][^'"]*['"];?\s*$/gm, '')
+  code = code.replace(/^import\s*['"][^'"]*['"];?\s*$/gm, '')
   return { code, exports }
 }
 
 const modules = [
   path.join(SRC, 'decision.js'),
   path.join(SRC, 'grokbot', 'data.js'),
+  path.join(SRC, 'grokbot', 'motion.js'),
   path.join(SRC, 'grokbot', 'engine.js'),
   path.join(SRC, 'colors-shared.js'),
   path.join(SRC, 'palette.js'),

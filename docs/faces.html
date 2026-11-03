@@ -1,7 +1,7 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>表情素材参考</title><style>
  body{margin:0;padding:22px 24px 28px;background:#15171c;color:#e8e8ea;font:13px/1.5 -apple-system,"PingFang SC",sans-serif}
  h1{font-size:14px;font-weight:600;margin:0 0 4px;color:#f0f1f3}
- .sub{font-size:11.5px;color:#8b93a1;margin:0 0 6px;max-width:760px}
+ .sub{font-size:11.5px;color:#8b93a1;margin:0 0 6px;max-width:780px}
  h2{font-size:12px;font-weight:600;color:#9aa3b2;margin:22px 0 12px;letter-spacing:.04em}
  .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:14px 8px}
  .cell{display:flex;flex-direction:column;align-items:center;gap:5px}
@@ -9,13 +9,23 @@
  .n{font-size:10.5px;color:#c9cdd6}
  .note{font-size:11px;color:#6b7280;margin:14px 0 0;max-width:780px;line-height:1.6}
 </style></head><body>
-<h1>表情素材参考（不是运行状态）</h1>
-<p class="sub">下面这些是 GrokBot 素材库里的动作预设，用来给六态挑表情池。它们<strong>不是</strong>本插件的业务状态——插件对外只有 idle / working / waiting / blocked / thinking / done 六个。</p>
+<h1>表情素材参考（不是运行状态，也不是六态动画）</h1>
+<p class="sub">
+下面这些是 GrokBot 素材库里的预设，只提供<strong>眼型</strong>。
+六态的实际动画在 <code>src/grokbot/motion.js</code>：blocked 是感叹号、
+thinking 是三颗点、done 是彩色轨道环绕 —— 这些<strong>都不是</strong>换一张素材脸能得到的。
+</p>
 <div id="root"></div>
-<p class="note">历史截图里的 sleeping / waking / searching / curious / proud 等名字都属于这一层：表情素材。把它们当成运行状态目录是错的。</p>
+<p class="note">
+这张图曾经被当成「六态动画已完成」的证据，那是个错误：素材预设名（sleeping / waking /
+searching / curious / proud …）与运行状态无关，也与本次按参考录屏重建的动作无关。
+素材现在只服务 idle / working / done 的<strong>眼睛造型</strong>；
+替身动作（转动、拖尾、符号形变、轨道）全部来自动作采样器。<br>
+六态验收请看 <code>docs/states.html</code> 与 <code>preview.html</code>。
+</p>
 <script type="module">
 import { TB_EXPRESSIONS, TB_SHAPES, TB_STATES } from '../src/grokbot/data.js'
-import { createBot, runBot } from '../src/grokbot/engine.js'
+import { createBot } from '../src/grokbot/engine.js'
 
 const INK = '#1084fe'
 const SURFACE = '#15171c'
@@ -23,7 +33,7 @@ const names = Object.keys(TB_STATES)
 const root = document.getElementById('root')
 
 const h2 = document.createElement('h2')
-h2.textContent = '素材库预设（' + names.length + ' 个动作预设，与运行状态数量无关）'
+h2.textContent = '素材库预设（' + names.length + ' 个，与运行状态数量无关）'
 root.appendChild(h2)
 const grid = document.createElement('div')
 grid.className = 'grid'
@@ -34,10 +44,10 @@ for (const name of names) {
   cell.className = 'cell'
   const box = document.createElement('div')
   box.className = 'box'
-  const inst = createBot({ shape: TB_SHAPES.blob, bodyFill: INK, eyeFill: SURFACE, size: 40 })
-  inst.state = name
+  const inst = createBot({ shape: TB_SHAPES.blob, expressions: TB_EXPRESSIONS, bodyFill: INK, eyeFill: SURFACE, size: 40 })
+  // 只画素材眼型本身：静态、不跑动作
+  inst.state = 'rest'
   box.appendChild(inst.svg)
-  runBot(inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: true })
   cell.appendChild(box)
   const n = document.createElement('div')
   n.className = 'n'

@@ -271,3 +271,42 @@ test('agent 中途接入（没见过 turn/start）时 running 仍能兜底', () 
   h.reg.onAgent('s1', 'status', { status: 'running' })
   assert.equal(h.phase(), 'thinking')
 })
+
+// ── 多个挂起交互：按身份管理，不用一个槽位丢掉其他 ──────────────────────────
+
+test('两条提问：答掉第一条之后仍然是 waiting', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'question/asked', data: { turn: 1, id: 'q1', questions: [{ id: 'q1' }] } })
+  h.reg.onEvent(session, { type: 'question/asked', data: { turn: 1, id: 'q2', questions: [{ id: 'q2' }] } })
+  assert.equal(h.phase(), 'waiting')
+  h.reg.onEvent(session, { type: 'question/answered', data: { turn: 1, id: 'q1' } })
+  assert.equal(h.phase(), 'waiting', '还有 q2 在等，不能掉成 thinking')
+  h.reg.onEvent(session, { type: 'question/answered', data: { turn: 1, id: 'q2' } })
+  assert.equal(h.phase(), 'thinking', '两条都答完才离开 waiting')
+})
+
+test('审批 + 提问同时挂起：解决审批后提问仍让它 waiting', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'approval/asked', data: { turn: 1, id: 'a1', toolName: 'write' } })
+  h.reg.onEvent(session, { type: 'question/asked', data: { turn: 1, id: 'q1', questions: [{ id: 'q1' }] } })
+  assert.equal(h.phase(), 'waiting')
+  h.reg.onEvent(session, { type: 'approval/decided', data: { turn: 1, id: 'a1' } })
+  assert.equal(h.phase(), 'waiting', '提问还挂着，不能因为审批解决就离开')
+  assert.equal(h.snapshot().detail.indexOf('question') !== -1, true, '细节要指向还挂着的那条')
+  h.reg.onEvent(session, { type: 'question/answered', data: { turn: 1, id: 'q1' } })
+  assert.equal(h.phase(), 'thinking')
+})
+
+test('阻塞式交互工具 + 事件审批：结果回来只解决它自己那一条', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c1', name: 'ask_user_question' } })
+  h.reg.onEvent(session, { type: 'approval/asked', data: { turn: 1, id: 'a1', toolName: 'write' } })
+  assert.equal(h.phase(), 'waiting')
+  h.reg.onEvent(session, { type: 'tool/result', data: { turn: 1, message: { source: { callId: 'c1' } } } })
+  assert.equal(h.phase(), 'waiting', '审批还挂着')
+  h.reg.onEvent(session, { type: 'approval/decided', data: { turn: 1, id: 'a1' } })
+  assert.equal(h.phase(), 'thinking')
+})

@@ -212,12 +212,18 @@ function makeRow(doc, section, sessionId) {
   return { row, slot }
 }
 
+/** 取眼睛图层（按图层标记找，不依赖子节点序号）。 */
+function eyeLayer(bot) {
+  const group = bot.querySelector('[data-dsgb-layer="eyes"]')
+  return group === null ? null : group.children[0]
+}
+
 function botOf(slot) {
   return slot.children.find((c) => String(c.getAttribute('class') || '').indexOf('dsgb-bot') !== -1)
 }
 
 function eyePoints(bot) {
-  const eye = bot.children[0].children[2].children[0]
+  const eye = eyeLayer(bot)
   return eye.getAttribute('points')
 }
 
