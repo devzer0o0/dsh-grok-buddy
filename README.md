@@ -300,6 +300,15 @@ blocked 还是感叹号、thinking 还是三颗点、done 还是头像 + 轨道�
 在真实 SVG 上核对图层构成、16px 布局矩形、轨道是否被裁、帧是否真的在推进、
 同态快照是否误重启动画、reduced-motion 是否真的不跑帧，并输出截图。
 
+`node scripts/bundle-check.mjs` 更进一步：它在真浏览器里加载**构建产物**
+`lib/widget.js`（不是预览页的同源模块），对着复刻的侧栏 DOM 跑一次
+boot → fetch → 挂载 → 六态渲染，核对六态的图层构成、未知会话的兜底完成、
+16px 布局、真实帧推进与可访问文本。假快照由脚本自己的服务器提供，
+**不写真实 state.json**。
+
+`node scripts/doc-shots.mjs` 从生产实现截 `docs/states.png` / `docs/faces.png`
+（取稳态帧，不是过渡开始的普通圆脸）。
+
 ## 界面适配：不是只有侧栏那一种行
 
 DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 [data-row-key^="session:"]：
