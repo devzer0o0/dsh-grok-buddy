@@ -25,7 +25,7 @@ const OUT = path.join(ROOT, 'lib', 'widget.js')
 function load(file) {
   let code = fs.readFileSync(file, 'utf8')
   const exports = []
-  // export const/function/let X
+  // export const/let/function/class X
   code = code.replace(/^export\s+(const|let|function|class)\s+([A-Za-z0-9_$]+)/gm, (m, kind, name) => {
     exports.push(name)
     return kind + ' ' + name
@@ -44,9 +44,17 @@ function load(file) {
 }
 
 const modules = [
+  path.join(SRC, 'decision.js'),
   path.join(SRC, 'grokbot', 'data.js'),
   path.join(SRC, 'grokbot', 'engine.js'),
+  path.join(SRC, 'colors-shared.js'),
+  path.join(SRC, 'palette.js'),
   path.join(SRC, 'mapping.js'),
+  path.join(SRC, 'widget', 'dom.js'),
+  path.join(SRC, 'widget', 'dsh-state.js'),
+  path.join(SRC, 'widget', 'activity.js'),
+  path.join(SRC, 'widget', 'celebrate.js'),
+  path.join(SRC, 'widget', 'styles.js'),
   path.join(SRC, 'widget', 'index.js'),
 ]
 

@@ -302,6 +302,9 @@ export function runBot(inst, deps) {
   let t0 = 0
   let last = 0
   let alive = true
+  // 让调用方能判断「这条动画还活着吗」—— 节点被摘掉时循环会自己停，
+  // 再挂回来必须重新起一个，否则只剩一张静止 SVG。
+  inst.running = true
 
   const tick = (ts) => {
     if (!alive) return
@@ -382,6 +385,7 @@ export function runBot(inst, deps) {
 
   const stop = () => {
     alive = false
+    inst.running = false
     if (raf) cancelAnimationFrame(raf)
     raf = 0
   }
