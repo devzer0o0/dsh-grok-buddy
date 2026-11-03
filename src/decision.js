@@ -244,8 +244,14 @@ export function decide(facts, options) {
   const lastActivity = typeof f.lastActivityAt === 'number' ? f.lastActivityAt : 0
   const silent = lastActivity > 0 && now - lastActivity > silenceTtl
 
-  // 「这一轮还在进行」：宿主明确开着这一轮，或（插件中途接入时）agent 在跑。
-  const running = f.turnOpen === true || (f.turnOpen !== true && f.agentRunning === true)
+  // 「这一轮还在进行」的三种证据：
+  //   · 宿主明确开着这一轮
+  //   · agent 在跑（插件中途接入时的兜底）
+  //   · 有一条未解决的交互 —— 它本身就是「有事等着人处理」的强证据，
+  //     不存在于任何已结束或无活动任务上。所以插件中途接入、只收到挂起提问时，
+  //     也能正确显示 waiting 而不是 idle。
+  const hasPending = pending !== undefined && pending !== null
+  const running = f.turnOpen === true || (f.turnOpen !== true && f.agentRunning === true) || hasPending
   if (!running) {
     // 没有在途任务，但也没拿到终态：这就是空闲。**不拿沉默冒充完成**。
     if (error !== undefined && error !== null && !silent) {
