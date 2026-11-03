@@ -74,6 +74,62 @@ function parseRadii(css, width, height) {
   return radii
 }
 
+/**
+ * 把一组眼环画到实例上（静态路径与动画路径共用）。
+ *
+ * @param {object} inst createBot 的产物。
+ * @param {Array} rings 双眼眼环。
+ * @param {number} turn 转头（弧度），静态姿态传 0。
+ * @param {number} gazeX 视线水平偏移，静态姿态传 0。
+ * @param {number} gazeY 视线垂直偏移，静态姿态传 0。
+ * @param {number} blinkScaleValue 眨眼纵向缩放，静态姿态传 1。
+ */
+function drawRings(inst, rings, turn, gazeX, gazeY, blinkScaleValue) {
+  const bodyScale = inst.shape.squashOnTurn ? Math.max(Math.cos(turn), 0.55) : 1
+  const squash = squashTransform(bodyScale)
+  if (squash === null) {
+    inst.body.removeAttribute('transform')
+    inst.clipBody.removeAttribute('transform')
+  } else {
+    inst.body.setAttribute('transform', squash)
+    inst.clipBody.setAttribute('transform', squash)
+  }
+
+  const originX = FACE_CENTER + inst.shape.faceX
+  const originY = FACE_CENTER + inst.shape.faceY
+  const radius = 105 * Math.min(inst.shape.faceScaleX, inst.shape.faceScaleY)
+  const baseScale = inst.shape.eyeScale
+  const polys = [inst.eyeL, inst.eyeR]
+
+  for (let i = 0; i < 2; i++) {
+    const corrected = rings[i].map((p) => [
+      originX + (p[0] - FACE_CENTER) * inst.shape.faceScaleX,
+      originY + (p[1] - FACE_CENTER) * inst.shape.faceScaleY,
+    ])
+    const center = centroid(corrected)
+    const offset = center.x - originX
+    const baseLongitude = Math.asin(clamp(offset / Math.max(radius, 1), -1, 1))
+    const longitude = baseLongitude + turn
+    const depth = Math.cos(longitude)
+    const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
+    const scaleX = clamp(perspective * baseScale, 0.02, 2.4)
+    const scaleY = clamp(blinkScaleValue * baseScale, 0.02, 2.4)
+
+    if (depth > 0.02) {
+      const cx = originX + radius * Math.sin(longitude) + gazeX
+      const cy = center.y + gazeY
+      const pts = []
+      for (const p of corrected) {
+        pts.push(fmt(cx + (p[0] - center.x) * scaleX) + ',' + fmt(cy + (p[1] - center.y) * scaleY))
+      }
+      polys[i].setAttribute('points', pts.join(' '))
+      polys[i].removeAttribute('style')
+    } else {
+      polys[i].style.display = 'none'
+    }
+  }
+}
+
 /** 按 2 位小数格式化，避免 -0。 */
 function fmt(n) {
   const r = Math.round(n * 100) / 100
@@ -223,6 +279,36 @@ export function runBot(inst, deps) {
   const reduced = deps.reduced === true
   const springFreq = 7
 
+  /**
+   * reduced-motion：**不启动持续动画**。
+   *
+   * 只关掉转头和视线偏移是不够的 —— 眨眼、随机换脸、弹簧形变与 RAF 仍然在跑，
+   * 600 帧之后眼睛点位会变化 332 次（已复现）。这里改成：
+   *   · 直接画一帧该状态的**静态姿态**（取表情池首帧，不眨眼、不形变）；
+   *   · 不排 RAF，因此没有持续帧；
+   *   · 状态切换时重画一次静态姿态即可（见 setBotState 之后的 restart）。
+   * 六态的区分靠姿态本身 + 可访问文案，不靠运动。
+   */
+  if (reduced) {
+    const paintStatic = () => {
+      const def = states[inst.state] || states.idle
+      const chosen = inst.pool !== null ? inst.pool : def.expressions
+      const idx = Array.isArray(chosen) && chosen.length > 0 ? chosen[0] : 0
+      const rings = expressions[idx] || expressions[0]
+      // turn / gaze 固定为 0：静态姿态，不做任何偏移
+      drawRings(inst, rings, 0, 0, 0, 1)
+    }
+    paintStatic()
+    inst.running = false
+    inst.static = true
+    inst.repaintStatic = paintStatic
+    return () => {
+      inst.running = false
+      inst.static = true
+      inst.repaintStatic = null
+    }
+  }
+
   let currentIdx = 0
   let current = expressions[currentIdx]
   let target = current
@@ -253,49 +339,7 @@ export function runBot(inst, deps) {
   }
 
   const draw = (rings, turn, gazeX, gazeY) => {
-    const bodyScale = inst.shape.squashOnTurn ? Math.max(Math.cos(turn), 0.55) : 1
-    const squash = squashTransform(bodyScale)
-    if (squash === null) {
-      inst.body.removeAttribute('transform')
-      inst.clipBody.removeAttribute('transform')
-    } else {
-      inst.body.setAttribute('transform', squash)
-      inst.clipBody.setAttribute('transform', squash)
-    }
-
-    const originX = FACE_CENTER + inst.shape.faceX
-    const originY = FACE_CENTER + inst.shape.faceY
-    const radius = 105 * Math.min(inst.shape.faceScaleX, inst.shape.faceScaleY)
-    const baseScale = inst.shape.eyeScale
-    const polys = [inst.eyeL, inst.eyeR]
-
-    for (let i = 0; i < 2; i++) {
-      const corrected = rings[i].map((p) => [
-        originX + (p[0] - FACE_CENTER) * inst.shape.faceScaleX,
-        originY + (p[1] - FACE_CENTER) * inst.shape.faceScaleY,
-      ])
-      const center = centroid(corrected)
-      const offset = center.x - originX
-      const baseLongitude = Math.asin(clamp(offset / Math.max(radius, 1), -1, 1))
-      const longitude = baseLongitude + turn
-      const depth = Math.cos(longitude)
-      const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
-      const scaleX = clamp(perspective * baseScale, 0.02, 2.4)
-      const scaleY = clamp(blinkScale() * baseScale, 0.02, 2.4)
-
-      if (depth > 0.02) {
-        const cx = originX + radius * Math.sin(longitude) + gazeX
-        const cy = center.y + gazeY
-        const pts = []
-        for (const p of corrected) {
-          pts.push(fmt(cx + (p[0] - center.x) * scaleX) + ',' + fmt(cy + (p[1] - center.y) * scaleY))
-        }
-        polys[i].setAttribute('points', pts.join(' '))
-        polys[i].removeAttribute('style')
-      } else {
-        polys[i].style.display = 'none'
-      }
-    }
+    drawRings(inst, rings, turn, gazeX, gazeY, blinkScale())
   }
 
   let raf = 0

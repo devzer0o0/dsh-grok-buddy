@@ -34,7 +34,8 @@ async function boot(opts) {
   const options = opts === undefined ? {} : opts
   const doc = new Doc()
   const frames = []
-  let now = 1_000_000
+  // epoch 量级的可控时钟（完成时间、失活阈值都按真实量级算）
+  let now = 1_700_000_000_000
   const timers = new Map()
   let timerSeq = 0
   const observers = []
@@ -82,10 +83,16 @@ async function boot(opts) {
     window,
     document: doc,
     navigator: window.navigator,
+    // Date.now 与 performance.now 必须走**同一个**可控时钟：
+    // 混用真实 epoch 与模拟单调时钟会让完成时间、失活阈值与采样时间互相矛盾。
     performance: { now: () => now },
     console,
     Math,
-    Date,
+    Date: class extends Date {
+      static now() {
+        return now
+      }
+    },
     JSON,
     Object,
     Array,
@@ -309,7 +316,7 @@ test('六态各自映射到不同的动作预设，且 DOM 只表达六态', asy
       phaseRow('s-waiting', 'waiting'),
       phaseRow('s-blocked', 'blocked'),
       phaseRow('s-thinking', 'thinking'),
-      doneRow('s-done', 'k-done', 1_000_000),
+      doneRow("s-done", "k-done", h.now),
     ]),
   )
   await h.tick(600)
@@ -325,7 +332,7 @@ test('done 在 2.6s / 3s / 6s / 30s 之后始终保持 celebrate', async () => {
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const { slot } = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+  h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
   assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'celebrate')
 
@@ -341,7 +348,7 @@ test('初次拿到 done 后停掉后续轮询，也不会有隐藏定时器把�
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const { slot } = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+  h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
   const before = botOf(slot).getAttribute('data-dsgb-motion')
   // 只跑动画帧 + 定时器，不再改变 state
@@ -376,7 +383,7 @@ test('done 过程中进入新一轮，旧回调不得覆盖新的状态', async 
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const { slot } = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+  h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
   assert.equal(botOf(slot).getAttribute('data-dsgb-phase'), 'done')
   h.setState(sessionsBody([phaseRow('s1', 'thinking')]))
@@ -390,7 +397,7 @@ test('查看并切走后即使宿主继续返回历史 done，也保持 idle 灰
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const made = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+  h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
   assert.equal(botOf(made.slot).getAttribute('data-dsgb-phase'), 'done')
 
@@ -408,7 +415,7 @@ test('查看并切走后即使宿主继续返回历史 done，也保持 idle 灰
 
   // 宿主继续返回同一条历史 done：不能重新庆祝
   for (let i = 0; i < 5; i++) {
-    h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+    h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
     await h.tick(600)
     assert.equal(botOf(made.slot).getAttribute('data-dsgb-phase'), 'idle', '已消费的完成不得重新庆祝')
   }
@@ -419,7 +426,7 @@ test('新一轮完成会建立新的展示周期（新 completionKey 重新庆�
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const made = makeRow(h.doc, section, 's1', false)
-  h.setState(sessionsBody([doneRow('s1', 'k1', 1_000_000)]))
+  h.setState(sessionsBody([doneRow('s1', 'k1', h.now)]))
   await h.tick(600)
   made.row.setAttribute('aria-selected', 'true')
   await h.tick(600)
@@ -427,7 +434,7 @@ test('新一轮完成会建立新的展示周期（新 completionKey 重新庆�
   await h.tick(600)
   assert.equal(botOf(made.slot).getAttribute('data-dsgb-phase'), 'idle')
 
-  h.setState(sessionsBody([doneRow('s1', 'k2', 1_000_600)]))
+  h.setState(sessionsBody([doneRow('s1', 'k2', h.now)]))
   await h.tick(600)
   assert.equal(botOf(made.slot).getAttribute('data-dsgb-phase'), 'done', '新完成重新庆祝')
   assert.equal(botOf(made.slot).getAttribute('data-dsgb-motion'), 'celebrate')
@@ -538,7 +545,7 @@ test('stop 之后迟到的网络响应不能重新写 DOM', async () => {
   h.setState(sessionsBody([phaseRow('s1', 'working')]))
   await h.tick(600)
   const release = h.holdNextRequest()
-  h.setState(sessionsBody([phaseRow('s1', 'done', { completionKey: 'late', completedAt: 1_000_000 })]))
+  h.setState(sessionsBody([phaseRow('s1', 'done', { completionKey: 'late', completedAt: h.now })]))
   await h.tick(500) // 请求挂住
   h.api.stop()
   release()

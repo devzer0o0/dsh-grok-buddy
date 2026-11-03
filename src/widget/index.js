@@ -57,7 +57,18 @@ const PAGE_ID = Math.random().toString(36).slice(2, 10) + '-' + Date.now().toStr
  */
 function boot() {
   if (window.__dshGrokBuddy !== undefined) return
-  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  /**
+   * reduced-motion 偏好：**可运行时变化**。
+   *
+   * 之前只在 boot 时读一次，系统偏好改了不生效，而且没有监听可以清理。
+   * 现在持有查询对象、订阅 change、并在 stop 时移除。
+   */
+  let reduce = false
+  let reduceQuery = null
+  if (typeof matchMedia === 'function') {
+    reduceQuery = matchMedia('(prefers-reduced-motion: reduce)')
+    reduce = reduceQuery !== null && reduceQuery !== undefined && reduceQuery.matches === true
+  }
   let dark = detectDark()
   const text = /^zh/i.test(navigator.language || '') ? PHASE_TEXT.zh : PHASE_TEXT.en
 
@@ -71,12 +82,94 @@ function boot() {
   const mounted = new WeakMap()
   /** 已挂载记录表（要按项目批量重刷，WeakMap 遍历不了） */
   const records = new Set()
-  /** completionKey → 用户查看它的时刻（完成消费按**完成身份**记，不按会话） */
-  const seenCompletions = new Map()
-  /** completionKey → 首次观测到它的时刻（completedAt 缺失时的稳定锚点） */
-  const observedCompletions = new Map()
-  /** completionKey → 是否已被消费（看过并切走） */
-  const consumedCompletions = new Set()
+  /**
+   * 完成生命周期表（按**完成身份**记，不按会话）。
+   *
+   * completionKey → {
+   *   observedAt    首次观测到该完成记录的时刻（completedAt 缺失时的稳定锚点）
+   *   viewedAt      用户开始查看它的时刻（进入展示周期）
+   *   consumedAt    用户查看后**切走**的时刻（= 展示周期结束）
+   * }
+   *
+   * ⚠️ 「查看」与「消费」必须分开：
+   *   选中只记 viewedAt，**不消费** —— 否则下一次同步就把 done 判成 idle，
+   *   用户看到的是一闪而过的庆祝。
+   *   只有「查看过、并且现在已经不选中」才写 consumedAt。
+   */
+  const completions = new Map()
+
+  /**
+   * 原生 done 的兜底完成周期：
+   * sessionId → { generation, lastSeenDoneAt, lastSeenActiveAt }
+   *
+   * 只在**缺少可靠完成身份**时使用。代数（generation）只在观察到
+   * 「活跃 → 完成」的真实转换时加一，所以：
+   *   · 同一轮完成不会被重复消费；
+   *   · 真实的新一轮完成能建立新周期；
+   *   · DOM 消失后重现、网络恢复、状态暂时缺失，都不会被当作新一轮。
+   */
+  const nativeCompletions = new Map()
+  /** 本轮同步里被原生 DOM 标记为 done 的会话（多表面共享）。 */
+  let nativeDoneSessions = new Set()
+
+  /** 取（或建）一条完成生命周期记录。 */
+  function lifecycleOf(key) {
+    let record = completions.get(key)
+    if (record === undefined) {
+      record = { observedAt: Date.now(), viewedAt: undefined, consumedAt: undefined }
+      completions.set(key, record)
+    }
+    return record
+  }
+
+  /** 这条完成是否已被消费（查看后切走）。 */
+  function isConsumed(key) {
+    const record = completions.get(key)
+    return record !== undefined && typeof record.consumedAt === 'number'
+  }
+
+  /** 这条完成是否被查看过（进入过展示周期）。 */
+  function isViewed(key) {
+    const record = completions.get(key)
+    return record !== undefined && typeof record.viewedAt === 'number'
+  }
+
+  /**
+   * 更新原生兜底完成周期。
+   *
+   * 只有「上一刻不是 done、这一刻是 done」才算一次**真实的新完成**。
+   * 这是保守的本地周期：它记录来源与限制，不假装等同于宿主的 turn 身份。
+   *
+   * @param {string} sessionId 会话 id。
+   * @param {boolean} done 这一轮该会话是否显示 done。
+   * @param {boolean} activeEvidence 是否有「正在跑」的证据（用来确认中间真的活跃过）。
+   * @param {number} at 当前时刻。
+   */
+  function noteNativeCompletion(sessionId, done, activeEvidence, at) {
+    let record = nativeCompletions.get(sessionId)
+    if (record === undefined) {
+      record = { generation: 0, sawDone: false, sawActiveSinceDone: false }
+      nativeCompletions.set(sessionId, record)
+    }
+    if (activeEvidence === true && record.sawDone === true) {
+      // 完成之后又真的活跃过 → 下一次 done 是新周期
+      record.sawActiveSinceDone = true
+    }
+    if (done === true) {
+      if (record.sawDone !== true) {
+        // 首次看到 done：如果此前活跃过，说明这是一次新完成
+        if (record.sawActiveSinceDone === true || record.generation === 0) {
+          if (record.sawActiveSinceDone === true) record.generation += 1
+        }
+        record.sawDone = true
+        record.sawActiveSinceDone = false
+      }
+    } else if (record.sawDone === true) {
+      // 不再 done：下一次 done 由 activeEvidence 决定是否为新周期
+      record.sawDone = false
+    }
+    record.lastAt = at
+  }
   let stopped = false
   let timer = null
   let colorsTimer = null
@@ -212,53 +305,77 @@ function boot() {
    * @param {object} surface 表面识别结果。
    * @returns {{phase: string, reason: string, entry: object|null, completionKey: string, consumed: boolean, observedAt: number|undefined, dshState: string|null}}
    */
-  function displayOf(surface) {
+  function displayOf(surface, shared) {
     const sessionId = surface.sessionId
-    const entry = byId.get(sessionId)
-    const known = entry !== undefined
-    const rawOurs = known ? normalizePhaseInput(entry.phase) : 'idle'
-    let completionKey = known && typeof entry.completionKey === 'string' ? entry.completionKey : ''
-    let observedAt = completionKey === '' ? undefined : observedCompletions.get(completionKey)
-    let consumed = completionKey !== '' && consumedCompletions.has(completionKey)
-
-    // 没有宿主完成身份、但 DSH 说 done：用「会话 + 首次看到它的时刻」造一个稳定身份，
-    // 这样「DSH 说完但插件没有完成记录」的会话也能被标记已查看、不会永远活跃。
-    if (completionKey === '' && !known) {
-      const dshPhase = fallbackPhase(surface.host)
-      if (dshPhase === 'done') {
-        completionKey = 'dsh:' + sessionId
-        if (observedAt === undefined && observedCompletions.has(completionKey) === false) {
-          observedCompletions.set(completionKey, Date.now())
-          observedAt = observedCompletions.get(completionKey)
-        } else if (observedAt === undefined) {
-          observedAt = observedCompletions.get(completionKey)
-        }
-        consumed = consumedCompletions.has(completionKey)
-      }
-    } else if (completionKey !== '' && observedAt === undefined) {
-      observedCompletions.set(completionKey, Date.now())
-      observedAt = observedCompletions.get(completionKey)
-    }
+    // 同一会话的语义只算一次：状态来源优先取本轮预计算的共享结果
+    const view = shared !== undefined ? shared : semanticOf(sessionId)
+    const entry = view.entry
+    const known = view.known
+    const completionKey = view.completionKey
+    const lifecycle = completionKey === '' ? undefined : completions.get(completionKey)
+    const observedAt = lifecycle === undefined ? undefined : lifecycle.observedAt
+    const consumed = completionKey !== '' && isConsumed(completionKey)
 
     const merged = mergePhase({
-      phase: rawOurs,
+      phase: view.rawPhase,
       known,
       consumed,
       completionKey,
       row: surface.host,
+      nativeDone: view.nativeDone,
+      reason: known && typeof entry.reason === 'string' ? entry.reason : '',
     })
     let phase = merged.phase
-    // 融合后仍是 done 时，才把消费状态真正落到展示上（已消费 → idle）
+    // 消费/失活必须参与**最终展示相位**，不只是颜色：
+    // 已消费的完成就是 idle，绝不能留着 phase=done 继续 celebrate。
     if (phase === 'done' && consumed) phase = 'idle'
+    // 兜底完成（没有宿主完成时间）同样要能失活，否则未知会话会一直庆祝下去。
+    if (phase === 'done' && known !== true && observedAt !== undefined && Date.now() - observedAt > DONE_DISPLAY_TTL_MS) {
+      phase = 'idle'
+    }
+    if (phase === 'done' && known === true && typeof entry === 'object' && entry !== null) {
+      const completedAt = typeof entry.completedAt === 'number' ? entry.completedAt : undefined
+      const anchor = completedAt === undefined ? observedAt : completedAt
+      if (anchor !== undefined && Date.now() - anchor > DONE_DISPLAY_TTL_MS) phase = 'idle'
+    }
     return {
       phase,
       reason: known && typeof entry.reason === 'string' ? entry.reason : merged.source,
-      entry: known ? entry : null,
+      entry,
       completionKey: phase === 'done' || consumed ? completionKey : '',
       consumed,
       observedAt,
       dshState: merged.dshState,
     }
+  }
+
+  /**
+   * 一个会话的**共享语义**：每次同步先算一次，再投影到各表面。
+   *
+   * 这样「第一个表面渲染时顺手消费、第二个表面立刻看到不同状态」不会发生，
+   * 遍历顺序也不影响结果。
+   *
+   * @param {string} sessionId 会话 id。
+   * @returns {{sessionId: string, known: boolean, rawPhase: string, entry: object|null, completionKey: string, nativeDone: boolean, lifecycleKey: string}}
+   */
+  function semanticOf(sessionId) {
+    const entry = byId.get(sessionId)
+    const known = entry !== undefined
+    const rawPhase = known ? normalizePhaseInput(entry.phase) : 'idle'
+    // 原生 done 由 DOM 适配层单独读，这里先占位（多表面时取「任一表面说过 done」）
+    const nativeDone = nativeDoneSessions.has(sessionId) === true
+    let completionKey = known && typeof entry.completionKey === 'string' ? entry.completionKey : ''
+
+    // 需要兜底完成身份的条件是「缺少可靠完成身份」，**不是**「插件不认识这个会话」：
+    // 已知会话也可能是 idle + 原生 done（插件漏了 turn/end），那种同样要能消费。
+    let lifecycleKey = completionKey
+    if (lifecycleKey === '' && (nativeDone || rawPhase === 'done')) {
+      const record = nativeCompletions.get(sessionId)
+      // 兜底身份按「会话 + 该会话已见过的完成代数」记，能在真实新完成时换代，
+      // 又不会每次轮询都生成新键。
+      lifecycleKey = 'native:' + sessionId + '#' + String(record === undefined ? 0 : record.generation)
+    }
+    return { sessionId, known, rawPhase, entry: known ? entry : null, completionKey: lifecycleKey, nativeDone, lifecycleKey }
   }
 
   /** 建/更新一只头像。 */
@@ -321,6 +438,7 @@ function boot() {
       record.dispose = () => {
         if (typeof stopBot === 'function') stopBot()
       }
+      record.reduceAtRun = reduce
       mounted.set(slot, record)
       records.add(record)
       // 插到最前面：这一格里可能还有 DSH 自己的标记（定时任务的时钟），
@@ -337,8 +455,8 @@ function boot() {
     record.observedAt = display.observedAt
     record.consumed = display.consumed === true
     record.completionKey = display.completionKey
-    const seen = display.completionKey === '' ? undefined : seenCompletions.get(display.completionKey)
-    record.seenAt = seen
+    const lifecycle = display.completionKey === '' ? undefined : completions.get(display.completionKey)
+    record.seenAt = lifecycle === undefined ? undefined : lifecycle.viewedAt
 
     const surfaceNow = surfaceOf(slot, dark)
     const inkNow = inkForRecord(record, surfaceNow)
@@ -431,11 +549,49 @@ function boot() {
   function syncRows() {
     if (stopped) return
     const surfaces = collectSurfaces(document)
+
+    // 第一遍：收集原生状态，按会话汇总（多表面共享）
+    nativeDoneSessions = new Set()
+    const nativeStateById = new Map()
+    for (const surface of surfaces.sidebar) {
+      const raw = dshRawStateOf(surface.host)
+      if (raw === null) continue
+      if (raw === 'done') nativeDoneSessions.add(surface.sessionId)
+      if (nativeStateById.has(surface.sessionId) === false) nativeStateById.set(surface.sessionId, raw)
+    }
+
+    // 第二遍：每个会话先更新**共享语义**（完成生命周期只算一次），再投影到表面
+    const semantics = new Map()
+    for (const surface of surfaces.sidebar) {
+      if (semantics.has(surface.sessionId)) continue
+      const entry = byId.get(surface.sessionId)
+      const rawPhase = entry === undefined ? 'idle' : normalizePhaseInput(entry.phase)
+      const nativeDone = nativeDoneSessions.has(surface.sessionId)
+      // 「真的活跃过」= 宿主说在跑（非 idle/done）
+      const activeEvidence = rawPhase === 'working' || rawPhase === 'thinking' || rawPhase === 'waiting' || rawPhase === 'blocked'
+      noteNativeCompletion(surface.sessionId, nativeDone, activeEvidence, Date.now())
+      const semantic = semanticOf(surface.sessionId)
+      semantics.set(surface.sessionId, semantic)
+
+      // 完成生命周期：观测时刻只写一次；查看与消费在这里统一推进
+      if (semantic.completionKey !== '') {
+        const key = semantic.completionKey
+        const record = lifecycleOf(key)
+        const viewing = surface.selected === true
+        // 查看中：记下进入时刻，但**不消费**
+        if (viewing && typeof record.viewedAt !== 'number') record.viewedAt = Date.now()
+        // 查看过、且现在不再查看 → 这才是「查看后切走」，此时才消费
+        if (typeof record.viewedAt === 'number' && typeof record.consumedAt !== 'number' && viewing !== true) {
+          record.consumedAt = Date.now()
+        }
+      }
+    }
+
+    // 第三遍：投影到各表面
     for (const surface of surfaces.sidebar) {
       const slot = surface.slot
       if (slot === null || slot === undefined) continue
-      const display = displayOf(surface)
-      consumeIfViewed(surface, display)
+      const display = displayOf(surface, semantics.get(surface.sessionId))
       slot.setAttribute(SLOT_ATTR, '1')
       surface.host.setAttribute(ROW_ATTR, surface.sessionId)
       surface.host.setAttribute(PROJECT_ATTR, surface.workspaceId)
@@ -462,19 +618,6 @@ function boot() {
     if (slot.getAttribute('role') !== 'img') slot.setAttribute('role', 'img')
     if (slot.getAttribute('aria-label') !== label) slot.setAttribute('aria-label', label)
     if (svg.getAttribute('data-dsgb-phase') !== phase) svg.setAttribute('data-dsgb-phase', phase)
-  }
-
-  /** 选中 / 打开过 ⇒ 这条完成记录被消费。只对 done 有意义。 */
-  function consumeIfViewed(surface, display) {
-    if (display.phase !== 'done') return
-    const key = display.completionKey
-    if (key === '') return
-    if (surface.selected !== true) return
-    const previous = seenCompletions.get(key)
-    if (previous !== undefined) return
-    seenCompletions.set(key, Date.now())
-    // 选中就是「正在看」：标记已看过；切走（选中解除）后即变灰
-    consumedCompletions.add(key)
   }
 
   // ── 项目行 ⋯ 菜单里的「颜色」入口 ────────────────────────────────────────
@@ -905,7 +1048,10 @@ function boot() {
         display: style === null ? null : style.display,
         visibility: style === null ? null : style.visibility,
         opacity: style === null ? null : style.opacity,
-        animating: record !== undefined && typeof record.dispose === 'function',
+        // animating 依据**引擎的真实运行状态**（reduced-motion 下静态姿态是 false），
+        // 而不是「有没有 dispose 函数」—— 有清理函数不等于帧在推进。
+        animating: record !== undefined && record.inst.running === true,
+        motionMode: record === undefined ? null : record.reduceAtRun === true ? 'static' : 'animated',
         ariaLabel: surface.slot !== null ? surface.slot.getAttribute('aria-label') : null,
         why: display.reason,
       })
@@ -1019,6 +1165,39 @@ function boot() {
   }
   onDispose(() => themeObserver.disconnect())
 
+  /**
+   * 系统偏好变化：重画**静态姿态**或恢复动画，不改变任何业务状态。
+   * done 在 reduced-motion 下仍是 done —— 变的是表现方式，不是语义。
+   */
+  const onReduceChange = (event) => {
+    if (stopped) return
+    reduce = event !== null && event !== undefined && typeof event.matches === 'boolean'
+      ? event.matches
+      : reduceQuery !== null && reduceQuery !== undefined
+        ? reduceQuery.matches === true
+        : reduce
+    for (const record of [...records]) {
+      if (!record.inst.svg.isConnected) {
+        disposeRecord(record)
+        continue
+      }
+      if (record.reduceAtRun === reduce) continue
+      // 换一种运行方式：先停旧的，再按新模式起
+      if (typeof record.dispose === 'function') record.dispose()
+      const stopBot = runBot(record.inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: reduce })
+      record.dispose = () => {
+        if (typeof stopBot === 'function') stopBot()
+      }
+      record.reduceAtRun = reduce
+    }
+  }
+  if (reduceQuery !== null && typeof reduceQuery.addEventListener === 'function') {
+    reduceQuery.addEventListener('change', onReduceChange)
+    onDispose(() => {
+      if (typeof reduceQuery.removeEventListener === 'function') reduceQuery.removeEventListener('change', onReduceChange)
+    })
+  }
+
   const onVisibility = () => {
     if (stopped) return
     if (!document.hidden) {
@@ -1074,12 +1253,16 @@ function boot() {
     },
     /** 当前所有完成的消费状态（诊断用）。 */
     completions() {
-      return [...observedCompletions.keys()].map((key) => ({
-        completionKey: key,
-        observedAt: observedCompletions.get(key),
-        seenAt: seenCompletions.get(key),
-        consumed: consumedCompletions.has(key),
-      }))
+      return [...completions.keys()].map((key) => {
+        const record = completions.get(key)
+        return {
+          completionKey: key,
+          observedAt: record.observedAt,
+          viewedAt: record.viewedAt,
+          consumedAt: record.consumedAt,
+          consumed: typeof record.consumedAt === 'number',
+        }
+      })
     },
     sync() {
       syncRows()

@@ -93,8 +93,12 @@ export function projectIdOf(row) {
   return typeof key === 'string' ? key.slice('workspace:'.length) : ''
 }
 
-/** 读一行里的 data-row-key，取出 session: 后面的 id。 */
-function sessionIdOfRowKey(row) {
+/**
+ * 读一行里的 data-row-key，取出 session: 后面的 id。
+ * @param {Element} row 候选行。
+ * @returns {string|null} 会话 id；不是会话行时返回 null。
+ */
+export function sessionIdOfRowKey(row) {
   const key = row !== null && row !== undefined && typeof row.getAttribute === 'function'
     ? row.getAttribute('data-row-key')
     : null

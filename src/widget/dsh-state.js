@@ -36,6 +36,12 @@ const STATE_MAP = Object.freeze({
 const OURS_WINS = new Set(['working', 'thinking', 'waiting', 'blocked'])
 
 /**
+ * 宿主判定理由里表示「有过完成、但展示周期已经结束」的那些。
+ * 这些情况下，DOM 上遗留的 done 不能再把头像顶回完成态。
+ */
+const EXPIRED_REASONS = new Set(['completion-expired', 'completion-consumed'])
+
+/**
  * 从一行会话里读出 DSH 自己的状态点。
  *
  * 我们自己的样式会把原生状态点藏掉（display:none），但节点与属性都还在，
@@ -100,6 +106,14 @@ export function mergePhase(input) {
   if (dshState === 'done') {
     // 3) DSH 说完成：已被消费的完成记录不能因此重新庆祝
     if (opts.consumed === true) return { phase: 'idle', source: 'consumed', dshState: raw }
+    // 宿主已经明确说过「这条完成展示已失活」时，遗留的 DOM done 不能把它顶回 done。
+    // 这正是「灰色庆祝」那条：状态文字是 idle、实例却还在 celebrate。
+    // 靠 reason 区分两种 idle：
+    //   completion-expired / completion-consumed → 曾经完成、现在不该再展示
+    //   no-open-turn / silent-turn               → 根本没有可展示的完成（DOM done 仍可兜底）
+    if (ours === 'idle' && opts.known === true && EXPIRED_REASONS.has(String(opts.reason || ''))) {
+      return { phase: 'idle', source: 'expired', dshState: raw }
+    }
     return { phase: 'done', source: 'dsh', dshState: raw }
   }
 
