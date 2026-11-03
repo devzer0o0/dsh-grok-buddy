@@ -1,42 +1,49 @@
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
- body{margin:0;padding:20px 22px;background:#15171c;color:#e8e8ea;font:13px/1.4 -apple-system,"PingFang SC",sans-serif}
- .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px}
- .cell{display:flex;flex-direction:column;align-items:center;gap:7px}
- .box{width:44px;height:44px;display:flex;align-items:center;justify-content:center}
- .n{font-size:11.5px;color:#c9cdd6}
- .k{font-size:9.5px;color:#6b7280;font-family:ui-monospace,Menlo,monospace}
+ body{margin:0;padding:22px 24px 28px;background:#15171c;color:#e8e8ea;font:13px/1.5 -apple-system,"PingFang SC",sans-serif}
+ h1{font-size:14px;font-weight:600;margin:0 0 4px;color:#f0f1f3}
+ .sub{font-size:11.5px;color:#8b93a1;margin:0 0 6px;max-width:760px}
+ h2{font-size:12px;font-weight:600;color:#9aa3b2;margin:22px 0 12px;letter-spacing:.04em}
+ .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:14px 8px}
+ .cell{display:flex;flex-direction:column;align-items:center;gap:5px}
+ .box{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
+ .n{font-size:10.5px;color:#c9cdd6}
+ .note{font-size:11px;color:#6b7280;margin:14px 0 0;max-width:780px;line-height:1.6}
 </style></head><body>
-<div class="grid" id="g"></div>
-<script>
-(function () {
-  const MAP = [['空闲', 'idle'], ['思考', 'thinking'], ['正在处理', 'working'],
-               ['正在等待', 'waiting'], ['已阻止', 'blocked'], ['完成', 'done']];
-  const sessions = [];
-  const g = document.getElementById('g');
-  for (const [label, phase] of MAP) {
-    sessions.push({ id: phase, phase: phase, detail: '' });
-    const cell = document.createElement('div'); cell.className = 'cell';
-    const box = document.createElement('div'); box.className = 'box';
-    const row = document.createElement('div');
-    row.setAttribute('data-row-key', 'session:' + phase);
-    row.style.cssText = 'display:flex;align-items:center;justify-content:center';
-    const slot = document.createElement('span');
-    slot.style.cssText = 'width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center';
-    row.appendChild(slot); box.appendChild(row); cell.appendChild(box);
-    const n = document.createElement('div'); n.className = 'n'; n.textContent = label;
-    const k = document.createElement('div'); k.className = 'k'; k.textContent = phase;
-    cell.appendChild(n); cell.appendChild(k); g.appendChild(cell);
-  }
-  window.__GROK_BUDDY_DEMO__ = { now: Date.now(), sessions: sessions };
-  const realFetch = window.fetch;
-  window.fetch = (u, o) => String(u).includes('/dsh-grok-buddy/state.json')
-    ? Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)), { status: 200 }))
-    : realFetch.call(window, u, o);
-  const s = document.createElement('script');
-  s.src = '../lib/widget.js';
-  document.head.appendChild(s);
-  setInterval(function () {
-    document.querySelectorAll('svg.dsgb-bot').forEach((svg) => { svg.setAttribute('width', '44'); svg.setAttribute('height', '44'); });
-  }, 60);
-})();
-</script></body></html>
+<h1>表情素材参考（不是运行状态）</h1>
+<p class="sub">下面这些是 GrokBot 素材库里的动作预设，用来给六态挑表情池。它们<strong>不是</strong>本插件的业务状态——插件对外只有 idle / working / waiting / blocked / thinking / done 六个。</p>
+<div id="root"></div>
+<p class="note">历史截图里的 sleeping / waking / searching / curious / proud 等名字都属于这一层：表情素材。把它们当成运行状态目录是错的。</p>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES, TB_STATES } from '../src/grokbot/data.js'
+import { createBot, runBot } from '../src/grokbot/engine.js'
+
+const INK = '#1084fe'
+const SURFACE = '#15171c'
+const names = Object.keys(TB_STATES)
+const root = document.getElementById('root')
+
+const h2 = document.createElement('h2')
+h2.textContent = '素材库预设（' + names.length + ' 个动作预设，与运行状态数量无关）'
+root.appendChild(h2)
+const grid = document.createElement('div')
+grid.className = 'grid'
+root.appendChild(grid)
+
+for (const name of names) {
+  const cell = document.createElement('div')
+  cell.className = 'cell'
+  const box = document.createElement('div')
+  box.className = 'box'
+  const inst = createBot({ shape: TB_SHAPES.blob, bodyFill: INK, eyeFill: SURFACE, size: 40 })
+  inst.state = name
+  box.appendChild(inst.svg)
+  runBot(inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: true })
+  cell.appendChild(box)
+  const n = document.createElement('div')
+  n.className = 'n'
+  n.textContent = name
+  cell.appendChild(n)
+  grid.appendChild(cell)
+}
+</script>
+</body></html>

@@ -94,16 +94,33 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 
 ### waiting 覆盖的真实来源
 
-不是只支持审批。DSH 里三种「等人」的交互都接：
+不是只支持审批。DSH 里「等人」有两类**互补**的真实来源，本插件两处都接：
 
-| 来源 | 真实宿主契约 |
-| --- | --- |
-| 审批 | approval/asked ↔ approval/decided 事件对 |
-| 提问 | sessionProjections 的 userQuestions 投影，active[].state === 'open' |
-| 计划评审 | 同上，questions[0].intent.kind === 'plan-review' |
+| 来源 | 真实宿主契约 | 覆盖什么 |
+| --- | --- | --- |
+| 审批 | `approval/asked` ↔ `approval/decided` 事件对（带 `id`） | 所有需要批准的调用 |
+| `userQuestions` 投影 | `sessionProjections.stateOf(session, 'userQuestions')` | **带 timeout** 的 `ask_user_question` 和计划评审 |
+| 未结束的交互式工具调用 | `tool/call` 名为 `ask_user_question` / `exit_plan_mode` 且结果未回 | **阻塞式**提问与评审（它们根本不进投影） |
 
-ask_user_question 与 exit_plan_mode 都走 userQuestions 服务，本插件读的是这个
-**宿主自己的投影**，不发明事件名。投影不可用时静默退化为只用审批事件。
+⚠️ **投影的 raw state ≠ wire view**。这是踩过的坑：
+
+```text
+stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled } }
+曾经的误读         state.active            ← 永远 undefined，挂起提问被算成 working
+正确路径           state.questions.active
+```
+
+`active` 里两种状态都算「还要人回答」：`open`（正在等）与 `continued`
+（带 timeout 的提问超时返回 pending，用户仍可回答）。
+
+三种结果必须分开，不能都当「已解决」：
+
+* 明确有挂起交互 → waiting
+* 明确没有（投影返回空）→ 清掉投影来源
+* 投影不可用或读取失败 → **保留**现有事实，不凭空清空
+
+交互的解决事件必须匹配**当前有效交互的身份**（`id` / `callId` / 轮次），
+不能只按事件类型清空 —— 旧轮的 `approval/decided` 曾把当前轮的新审批清掉。
 
 ### 完成展示（用户确认的规则）
 
@@ -122,6 +139,40 @@ ask_user_question 与 exit_plan_mode 都走 userQuestions 服务，本插件读�
 完成身份按 completionKey（sessionId#turn）记，**不是**按会话 id 一刀切。
 缺 completedAt 时用页面的「首次观测时刻」作稳定锚点，所以「无法标记已查看、
 永远活跃」不会发生。
+
+#### 「查看」与「消费」是两件事
+
+踩过的坑：选中就立刻写 consumed，下一次同步就把 done 判成 idle ——
+用户看到的是一闪而过的庆祝。现在严格分开：
+
+| 事实 | 何时写入 | 效果 |
+| --- | --- | --- |
+| `viewedAt` | 该完成进入展示且该行**被选中** | 记录「用户在看了」，**不消费**，仍是 done + 项目色 |
+| `consumedAt` | 已经 `viewedAt` 过，**且现在不再选中** | 这才是「查看后切走」→ 退出展示 → idle、灰 |
+
+「查看」的证据是侧栏的选择状态（`aria-selected`，DSH 自带的选中契约），
+不是 CSS 外观。悬停、搜索高亮、DOM 卸载、虚拟列表回收**都不算**查看或切走。
+
+同一会话可能同时出现在多个表面：生命周期在**会话**粒度算一次，再投影到各表面，
+所以遍历顺序不会让第一个表面把完成消费掉、第二个表面立刻看到不同状态。
+
+#### 兜底完成周期
+
+插件可能漏掉 `turn/end`，或者它比页面启动更早。这时没有宿主 completionKey，
+需要一条兜底身份。条件是**「缺少可靠完成身份」**，而不是「插件不认识这个会话」——
+已知会话也可能 idle + 原生 done。
+
+兜底身份形如 `native:<sessionId>#<generation>`，代数只在观察到真实的
+「活跃 → 完成」转换时加一：
+
+* 同一轮完成不会被重复消费；
+* 真实的新一轮完成能建立新周期、重新庆祝；
+* DOM 消失后重现、网络恢复、状态暂时缺失，都**不会**被当作新一轮；
+* 兜底完成同样受失活阈值约束，超时后退出 done（不是一直灰色庆祝）。
+
+**限制**：`generation` 是页面内存里的保守计数。页面重载或宿主重启后它从零开始，
+因此跨重启的严格去重**不成立**；本插件不把生命周期元数据写入磁盘，也就不需要
+版本与清理机制，但也拿不到跨重启的完成身份。这是已知边界，不宣称更强保证。
 
 ### 两个阈值（实现参数，集中在 src/decision.js）
 
@@ -209,8 +260,12 @@ ask_user_question 与 exit_plan_mode 都走 userQuestions 服务，本插件读�
 
 blocked 的「不眨眼」是最好认的一条：其它动作都会眨，它定住不动。
 
-**prefers-reduced-motion**：停止持续运动、眨眼与弹簧形变，改用可区分的**静态姿态**
-加可访问文案表达六态（aria-label 跟着状态更新，中英各一套）。
+**prefers-reduced-motion**：**不启动持续动画**——不是只关掉转头和视线偏移。
+眨眼、随机换脸、弹簧形变与 RAF 全部停掉，直接画一帧该状态的静态姿态；
+六态的区分靠姿态本身加可访问文案（aria-label 跟着状态更新，中英各一套）。
+系统偏好在运行时变化时会重画静态姿态或恢复动画，**不改变任何业务状态**：
+done 在 reduced-motion 下仍是 done。诊断里的 `animating` 依据引擎真实运行
+状态，而不是「有没有 dispose 函数」。
 
 鼠标悬停能看到具体细节（在读哪个工具、失败代号）。
 
@@ -220,13 +275,23 @@ DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 [data-
 
 | 表面 | 结构 | 身份来源 | 本插件 |
 | --- | --- | --- | --- |
-| 侧栏会话行 | div[data-row-key="session:<id>"][role=treeitem] | data-row-key | 支持（含 HoverCard 包装、嵌套 groupSection） |
-| 搜索结果行 | div[role=treeitem]，**无 data-row-key** | 只有标题文本 | **不猜身份**，记 unidentifiableSearch |
-| 悬停卡片 | renderSlot("sidebar.session.row.hover", {sessionId}) | 槽位参数 | 目前不加头像（卡片本身已显示状态行） |
+| 侧栏会话行 | div[data-row-key="session:<id>"][role=treeitem] | `data-row-key` | **支持**（含 HoverCard 包装、嵌套 groupSection、虚拟列表复用） |
+| 搜索结果行 | div[role=treeitem]，**无 data-row-key** | 只有标题文本 | **不猜身份**，记 `unidentifiableSearch` |
+| 悬停卡片 | HoverCard 用 `createPortal` 挂到 body；正文由 `renderSlot("sidebar.session.row.hover", { sessionId })` 渲染 | sessionId 是 **React 参数**，不进 DOM | **不挂头像**（卡片自身已显示标题与状态行） |
 
-搜索行的 16px 槽位是嵌套结构（searchResultHeading > slot），**不是**「首个窄于
+搜索行的 16px 槽位是嵌套结构（`searchResultHeading > slot`），**不是**「首个窄于
 20px 的子节点」。缺稳定身份时宁可不上头像，也不按标题或顺序猜 —— 那会张冠李戴到
-同名会话上。要把搜索也覆盖上，需要宿主补一个稳定身份属性（见「未完成」）。
+同名会话上，比不显示更糟。
+
+要覆盖这两种表面，需要一个**公开的稳定身份入口**，二选一：
+
+1. 在搜索结果行上暴露 `data-row-key="session:<id>"`（最小改动，本插件已能自动识别，
+   见 `test/surface-adapters.test.mjs` 的 S8）；或
+2. 提供 `sidebar.workspaces.search.result.leading` 之类的 leading 槽位。
+
+这两条都需要宿主改动，或用 `dsh.client` 模块 + `ctx.slots` 注册（本插件当前走
+head 注入，不是 client 模块）。本插件不修改安装包、不依赖 React Fiber 等私有结构
+绕过这一条。
 
 同一 session 在多个表面同时显示时，**共享事实与完成消费**，但各自拥有独立的 DOM
 动画实例。
@@ -342,13 +407,30 @@ node --test "test/*.test.mjs"     # 单元 / 决策 / 路由 / 构建产物集�
 
 preview.html 与 docs/*.html 跑的都是构建产物本身，不依赖 DSH。
 
-## 未完成
+## 未完成与已知边界
 
-* **搜索结果行**没有稳定身份属性，所以目前不挂头像（只如实记账）。要覆盖它，需要
-  宿主补一个公开的稳定身份（例如在搜索结果行上暴露 data-row-key="session:<id>"，
-  或提供 search 结果的 leading 槽位）。本插件不修改安装包、不依赖 React 私有内部
-  结构来绕过这一条。
-* 悬停卡片目前不加独立头像（卡片自身已显示状态行与标题）。
+**功能缺口（需宿主改动，本插件不猜）**
+
+* **搜索结果行**：当前 DSH 的 `SearchResultItem` 只渲染 `role/aria-selected`，
+  不写 `data-row-key`；16px 槽位嵌在 `searchResultHeading > slot` 里。
+  本插件如实记账（`unidentifiableSearch`）但不挂头像。
+  最小公开契约是两种之一：搜索结果行暴露 `data-row-key="session:<id>"`
+  （本插件已能自动识别），或提供 leading 槽位。
+* **悬停卡片**：`HoverCard` 用 `createPortal` 挂到 `document.body`，
+  `sessionId` 只是 `renderSlot("sidebar.session.row.hover", { sessionId })` 的
+  React 参数，不进 DOM。不挂独立头像（卡片自身已显示标题与状态行）。
+* 上述两条都可用 `dsh.client` 模块 + `ctx.slots` 注册解决，但本插件当前走
+  head 注入架构，不是 client 模块。改造它超出「修复六态」的范围，
+  也**不修改安装包**来绕过。
+
+**证据边界（不要过度解读）**
+
+* HTTP `/dsh-grok-buddy/widget.js` 返回的 hash 一致，只证明**服务端在提供新 bundle**；
+  它**不**证明宿主进程加载了新逻辑，也**不**证明当前 renderer 实例执行了新 bundle。
+  三层要分别核验（见「刷新、重启与验收」）。
+* 兜底完成周期的 `generation` 是页面内存计数，**跨重启严格去重不成立**。
+* `prefers-reduced-motion` 的静态姿态只保证六态在素材层可区分；
+  16px 下的可辨识度以真实侧栏截评为准，不以放大预览为准。
 
 ## 致谢与许可
 
