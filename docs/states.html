@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+ body{margin:0;padding:22px 24px 30px;background:#15171c;color:#e8e8ea;font:13px/1.5 -apple-system,"PingFang SC",sans-serif}
+ h1{font-size:14px;font-weight:600;margin:0 0 3px;color:#f0f1f3}
+ .sub{font-size:11.5px;color:#6b7280;margin:0 0 6px}
+ h2{font-size:12px;font-weight:600;color:#9aa3b2;margin:24px 0 12px;letter-spacing:.04em}
+ .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:22px 10px}
+ .cell{display:flex;flex-direction:column;align-items:center;gap:6px}
+ .box{width:56px;height:56px;display:flex;align-items:center;justify-content:center}
+ .box.small{width:16px;height:16px}
+ .n{font-size:11.5px;color:#dfe2e8}
+ .k{font-size:9px;color:#7b8494;font-family:ui-monospace,Menlo,monospace}
+ .c{font-size:8.5px;color:#4b5563;font-family:ui-monospace,Menlo,monospace;text-align:center;line-height:1.3}
+ .note{font-size:10px;color:#6b7280;margin:8px 0 0;max-width:640px}
+ .row{display:flex;gap:26px;align-items:flex-end;margin-top:6px}
+</style></head><body>
+<h1>运行状态：六个，一个不多一个不少</h1>
+<p class="sub">颜色只是项目的身份色，状态完全靠动作表达。下面第一排是六态的实际动作，第二排是同一个头像在侧栏里的真实尺寸（16px）。</p>
+<div id="root"></div>
+<p class="note">动作预设名（motion preset）是内部动画资源标识，不是对外状态。
+素材库里还有 proud / excited / curious / sleeping 等二十多个预设，它们只作为表情素材参考，不参与会话状态判定。</p>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES, TB_STATES } from '../src/grokbot/data.js'
+import { createBot, runBot } from '../src/grokbot/engine.js'
+
+const PHASES = [
+  ['idle', 'idle', '空闲', '#1084fe'],
+  ['working', 'working', '正在处理', '#9159fe'],
+  ['waiting', 'bored', '正在等待', '#ff9800'],
+  ['blocked', 'alerting', '已阻止', '#ff309b'],
+  ['thinking', 'thinking', '思考', '#00bca6'],
+  ['done', 'celebrate', '完成', '#ff263c'],
+]
+
+const root = document.getElementById('root')
+
+function grid(title) {
+  const h = document.createElement('h2')
+  h.textContent = title
+  root.appendChild(h)
+  const g = document.createElement('div')
+  g.className = 'grid'
+  root.appendChild(g)
+  return g
+}
+
+function render(target, phase, motion, label, ink, size) {
+  const cell = document.createElement('div')
+  cell.className = 'cell'
+  const box = document.createElement('div')
+  box.className = size === 16 ? 'box small' : 'box'
+  const inst = createBot({ shape: TB_SHAPES.blob, bodyFill: ink, eyeFill: '#15171c', size: size })
+  inst.state = motion
+  box.appendChild(inst.svg)
+  runBot(inst, { expressions: TB_EXPRESSIONS, states: TB_STATES, reduced: false })
+  cell.appendChild(box)
+  if (size !== 16) {
+    const n = document.createElement('div')
+    n.className = 'n'
+    n.textContent = label
+    const k = document.createElement('div')
+    k.className = 'k'
+    k.textContent = phase
+    const c = document.createElement('div')
+    c.className = 'c'
+    c.textContent = 'motion: ' + motion
+    cell.append(n, k, c)
+  }
+  target.appendChild(cell)
+}
+
+const big = grid('六态的实际动作（放大到 56px 便于观察）')
+for (const [phase, motion, label, ink] of PHASES) render(big, phase, motion, label, ink, 56)
+
+const small = grid('同一只头像在侧栏里的真实尺寸（16px）')
+for (const [phase, motion, label, ink] of PHASES) render(small, phase, motion, label, ink, 16)
+</script>
+</body></html>

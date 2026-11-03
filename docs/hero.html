@@ -60,13 +60,13 @@
 window.__GROK_BUDDY_DEMO__ = {
   now: Date.now(),
   sessions: [
-    { id: 'a1', phase: 'thinking',  detail: 'step 2' },
-    { id: 'a2', phase: 'tool',      detail: 'bash' },
-    { id: 'a3', phase: 'waiting',   detail: 'write' },
-    { id: 'a4', phase: 'streaming', detail: '' },
-    { id: 'a5', phase: 'completed', detail: '' },
-    { id: 'a6', phase: 'retry',     detail: 'RATE_LIMIT / 2' },
-    { id: 'a7', phase: 'error',     detail: 'QUOTA' }
+    { id: 'a1', phase: 'thinking', detail: 'step 2' },
+    { id: 'a2', phase: 'working',  detail: 'bash' },
+    { id: 'a3', phase: 'waiting',  detail: 'write' },
+    { id: 'a4', phase: 'working',  detail: '' },
+    { id: 'a5', phase: 'done',     detail: '' },
+    { id: 'a6', phase: 'blocked',  detail: 'RATE_LIMIT / 2' },
+    { id: 'a7', phase: 'blocked',  detail: 'QUOTA' }
   ]
 };
 const realFetch = window.fetch;

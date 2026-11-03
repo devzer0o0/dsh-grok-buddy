@@ -20,8 +20,8 @@
  .slot{width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 </style></head><body>
 <h1>dsh-grok-buddy · GrokBot 状态头像</h1>
-<p class="sub">头像按官方 GrokBot 几何重建：眼睛是贴在球面上的多边形，转头时会透视变形、转到背面消失；表情切换是弹簧形变，还带随机眨眼。状态直接画在头像上，对应官方 lifecycle（Idle / Working / Waiting / Blocked / Thinking / Done）；墨色取自官方 Grok Bot 的 ink，颜色只表示生命周期，细分相位同色不同脸。</p>
-<h2>八种状态</h2>
+<p class="sub">头像按官方 GrokBot 几何重建：眼睛是贴在球面上的多边形，转头时会透视变形、转到背面消失；表情切换是弹簧形变，还带随机眨眼。运行状态只有六个（Idle / Working / Waiting / Blocked / Thinking / Done），直接画在头像上；颜色表示**项目身份**，六态同色，变的全是动作。</p>
+<h2>六种运行状态</h2>
 <div class="grid" id="big"></div>
 <h2>1:1 · 侧栏实际大小</h2>
 <div class="grid" id="small"></div>
@@ -34,12 +34,12 @@ window.__GROK_BUDDY_DEMO__ = {
   sessions: [
     { id: 'd0', phase: 'idle', detail: '' },
     { id: 'd1', phase: 'thinking', detail: 'step 2' },
-    { id: 'd2', phase: 'streaming', detail: '' },
-    { id: 'd3', phase: 'tool', detail: 'bash' },
+    { id: 'd2', phase: 'working', detail: '' },
+    { id: 'd3', phase: 'working', detail: 'bash' },
     { id: 'd4', phase: 'waiting', detail: 'write' },
-    { id: 'd5', phase: 'retry', detail: 'RATE_LIMIT / 2' },
-    { id: 'd6', phase: 'error', detail: 'QUOTA' },
-    { id: 'd7', phase: 'completed', detail: '' }
+    { id: 'd5', phase: 'blocked', detail: 'RATE_LIMIT / 2' },
+    { id: 'd6', phase: 'blocked', detail: 'QUOTA' },
+    { id: 'd7', phase: 'done', detail: '' }
   ]
 };
 const realFetch = window.fetch;
@@ -54,8 +54,8 @@ window.fetch = function (url, opts) {
 <script>
 (function () {
   const MAP = [
-    ['安静', 'idle', 'd0'], ['思考中', 'thinking', 'd1'], ['输出中', 'streaming', 'd2'], ['执行工具', 'tool', 'd3'],
-    ['等你确认', 'waiting', 'd4'], ['重试中', 'retry', 'd5'], ['失败', 'error', 'd6'], ['刚完成', 'completed', 'd7']
+    ['空闲', 'idle', 'd0'], ['思考', 'thinking', 'd1'], ['正在处理', 'working', 'd2'],
+    ['正在等待', 'waiting', 'd4'], ['已阻止', 'blocked', 'd6'], ['完成', 'done', 'd7']
   ];
   function rowFor(id, title, meta) {
     const row = document.createElement('div');

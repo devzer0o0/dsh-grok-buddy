@@ -9,8 +9,8 @@
 <div class="grid" id="g"></div>
 <script>
 (function () {
-  const MAP = [['安静', 'idle'], ['思考中', 'thinking'], ['输出中', 'streaming'], ['执行工具', 'tool'],
-               ['等你确认', 'waiting'], ['重试中', 'retry'], ['失败', 'error'], ['刚完成', 'completed']];
+  const MAP = [['空闲', 'idle'], ['思考', 'thinking'], ['正在处理', 'working'],
+               ['正在等待', 'waiting'], ['已阻止', 'blocked'], ['完成', 'done']];
   const sessions = [];
   const g = document.getElementById('g');
   for (const [label, phase] of MAP) {

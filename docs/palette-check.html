@@ -28,8 +28,8 @@
 </footer>
 <script>
 (function () {
-  const MAP = [['安静', 'idle'], ['思考中', 'thinking'], ['输出中', 'streaming'], ['执行工具', 'tool'],
-               ['等你确认', 'waiting'], ['重试中', 'retry'], ['失败', 'error'], ['刚完成', 'completed']];
+  const MAP = [['空闲', 'idle'], ['思考', 'thinking'], ['正在处理', 'working'],
+               ['正在等待', 'waiting'], ['已阻止', 'blocked'], ['完成', 'done']];
   // 先建 DOM，再给 widget 喂数据 —— 两个面板各一套会话 id
   const sessions = [];
   function mount(pane, label, phase) {

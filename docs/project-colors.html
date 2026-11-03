@@ -1,0 +1,84 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
+:root{--fg:#1f2328;--bg:#eff1f3;--page:#dfe3e7;--muted:#8a9099}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);font:14px/20px "PingFang SC",system-ui,sans-serif;color:var(--fg);padding:16px}
+.grid{display:grid;grid-template-columns:360px 360px;gap:18px;justify-content:start}
+.sidebar{background:var(--bg);border-radius:10px;padding:8px 0}
+.groupSection{display:flex;flex-direction:column}
+.row{display:flex;align-items:center;gap:0;height:32px;padding:0 8px;border-radius:8px;color:var(--fg)}
+.row:hover{background:#e4e7ea}
+.row .slot{width:16px;height:20px;color:var(--muted);flex:none;display:inline-flex;justify-content:center;align-items:center}
+.row .title{flex:1;min-width:0;margin:0 6px 0 4px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.row .time{margin-left:auto;color:var(--muted);font-size:12px;padding-left:8px}
+.row .visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}
+.projectRow{display:flex;align-items:center;gap:0;height:32px;padding:0 8px;font-weight:600}
+.projectRow .slot{width:16px;height:20px;flex:none;display:inline-flex;justify-content:center;align-items:center;color:var(--muted)}
+.projectRow .chevron{width:16px}
+.projectRow .title{flex:1;margin:0 6px 0 4px}
+.projectRow .iconButton{border:none;background:transparent;color:var(--muted);cursor:pointer}
+[data-menu-material]{position:fixed;z-index:9999;top:60px;left:120px;background:#fff;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.28);padding:4px;display:none}
+[data-menu-material].open{display:block}
+[data-menu-material] .itemWrap{display:flex}
+[data-menu-material] button{display:flex;width:100%;align-items:center;gap:8px;padding:6px 10px;border:none;background:transparent;color:inherit;font:inherit;border-radius:6px;cursor:pointer;text-align:left}
+.cap{font-size:12px;color:#5f666e;margin:0 0 6px 2px}
+</style></head><body>
+<div class="grid">
+  <div><p class="cap">同一项目（proj-states）跑完整个生命周期 · 颜色全程不变</p>
+    <div class="sidebar">
+      <div class="groupSection">
+        <div class="projectRow" data-row-key="workspace:proj-states"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-states</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:st-idle"><span class="slot"><span data-state="idle"></span></span><span class="title">idle · 安静</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-thinking"><span class="slot"><span data-state="idle"></span></span><span class="title">thinking · 思考中</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-tool"><span class="slot"><span data-state="idle"></span></span><span class="title">tool · 执行工具</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-waiting"><span class="slot"><span data-state="idle"></span></span><span class="title">waiting · 等你确认</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-error"><span class="slot"><span data-state="idle"></span></span><span class="title">error · 失败</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-completed"><span class="slot"><span data-state="idle"></span></span><span class="title">completed · 刚完成</span><span class="time">现在</span></div>
+      </div>
+    </div>
+  </div>
+  <div><p class="cap">四个项目 · 默认色一眼可分（含定时任务时钟）</p>
+    <div class="sidebar">
+      <div class="groupSection">
+        <div class="projectRow" data-row-key="workspace:proj-alpha"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-alpha</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p1a"><span class="slot"><span data-state="idle"></span></span><span class="title">核对表情与颜色设计规范（1）</span><span class="time">24 分钟</span></div>
+        <div class="row" data-row-key="session:p1b"><span class="slot"><span data-state="idle"></span></span><span class="title">修复插件兼容性并重装</span><span class="time">14 小时</span></div>
+      </div>
+      <div class="groupSection">
+        <div class="projectRow" data-row-key="workspace:proj-beta"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-beta</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p2a"><span class="slot"><span data-state="idle"></span></span><span class="title">继续未完成的这个任务，但…</span><span class="time">16 小时</span></div>
+      </div>
+      <div class="groupSection">
+        <div class="projectRow" data-row-key="workspace:proj-gamma"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-gamma</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p3a"><span class="slot"><span data-state="idle"></span></span><span class="title">等你确认的那个审批</span><span class="time">3 分钟</span></div>
+      </div>
+      <div class="groupSection">
+        <div class="row" data-row-key="session:p4a"><span class="slot"><span data-state="idle"></span></span><span class="title">未分组的会话</span><span class="time">1 小时</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div data-menu-material><div class="itemWrap"><button role="menuitem"><span>✎</span><span>重命名</span></button></div><div class="itemWrap"><button role="menuitem" style="color:#e5484d"><span>🗑</span><span>删除工作区</span></button></div></div>
+<script>
+window.__openMenu = function (n) {
+  var row = document.querySelectorAll('.projectRow')[n]
+  document.querySelectorAll('.projectRow').forEach(function (r) { r.classList.remove('menuOpen') })
+  row.classList.add('menuOpen')
+  var s = document.querySelector('[data-menu-material]')
+  s.classList.add('open'); s.style.display = 'block'
+}
+window.__closeMenu = function () {
+  document.querySelectorAll('.projectRow').forEach(function (r) { r.classList.remove('menuOpen') })
+  document.querySelector('[data-menu-material]').style.display = 'none'
+}
+document.addEventListener('click', function (e) { if (e.target === document.body) window.__closeMenu() })
+;[].forEach.call(document.querySelectorAll('.iconButton'), function (btn, i) {
+  btn.addEventListener('click', function (e) { e.stopPropagation(); window.__openMenu(i) })
+})
+window.__addClock = function (id) {
+  var slot = document.querySelector('[data-row-key="session:' + id + '"] [data-dsgb-slot]')
+  var m = document.createElement('span'); m.className = 'mark'; m.setAttribute('data-session-schedule-mark', '')
+  m.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span class="visuallyHidden">1 个定时任务</span>'
+  slot.appendChild(m)
+}
+</script>
+<script src="../lib/widget.js"></script></body></html>
