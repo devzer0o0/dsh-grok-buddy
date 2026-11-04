@@ -34,9 +34,20 @@ test('原始取值可读（诊断用）', () => {
 })
 
 test('我们的强证据压过 DSH 的粗粒度信号', () => {
-  for (const ours of ['working', 'waiting', 'blocked', 'thinking']) {
+  for (const ours of ['working', 'waiting', 'thinking']) {
     assert.equal(mergePhase({ phase: ours, known: true, row: row('ongoing') }).phase, ours)
   }
+})
+
+test('blocked 只在有任务级停止证据时才压过 DSH 信号', () => {
+  assert.equal(mergePhase({ phase: 'blocked', known: true, stopCertain: true, row: row('ongoing') }).phase, 'blocked')
+  // 旧宿主只给了名字、没有证据：不能冒充「已确认的错误停止」
+  const legacy = mergePhase({ phase: 'blocked', known: true, row: row('ongoing') })
+  assert.equal(legacy.phase, 'idle')
+  assert.equal(legacy.source, 'blocked-without-evidence')
+  // 行里没有宿主状态点时，融合本身不参与判定：blocked 的可信度由调用方
+  // 结合 stopCertain 决定（widget 的 displayOf 会把它降级为 idle）。
+  assert.equal(mergePhase({ phase: 'blocked', known: true, row: EMPTY_ROW }).phase, 'blocked')
 })
 
 test('插件没有数据时用 DSH 的状态点兜底', () => {

@@ -105,13 +105,82 @@ test('E5 迟到 agent running 不清除已确认的成功终态', () => {
   assert.equal(h.row().terminalKind, 'completed')
 })
 
-test('E6 agent 又 running 不能无条件证明之前的有效错误已恢复', () => {
+test('E6 仅 agent running 不足以抹除已确认的错误停止', () => {
   const h = harness()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
-  assert.equal(h.phase(), 'blocked')
+  // 只收到 agent/error 时还不是停止（生命周期未确认）
+  assert.notEqual(h.phase(), 'blocked', '单独一条 agent/error 不是停止证据')
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked', '执行器停稳确认了停止')
   h.reg.onAgent('s1', 'status', { status: 'running' })
   assert.equal(h.phase(), 'blocked', '仅 agent running 不足以宣告错误已恢复')
+})
+
+test('E6b 确认停止后，同轮真实执行恢复才退出 blocked', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'NETWORK' } } } })
+  assert.equal(h.phase(), 'blocked')
+  // 真正的新一轮开始
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 2 } })
+  assert.notEqual(h.phase(), 'blocked', '新一轮按新事实显示')
+})
+
+test('E6c 恢复之后迟到的旧错误不会再推回 blocked', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'NETWORK' } } } })
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 2 } })
+  // turn/1 的迟到错误终止事件
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'NETWORK' } } } })
+  assert.notEqual(h.phase(), 'blocked')
+  assert.equal(h.row().stopCertain, false, '旧轮停止事实不得套用到当前轮')
+})
+
+test('E6d 迟到旧工具成功结果不能让已确认的停止虚假恢复', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c1', name: 'bash' } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked')
+  // 执行器停下后，同轮工具结果迟到送达
+  h.reg.onEvent(session, { type: 'tool/result', data: { turn: 1, message: { source: { callId: 'c1' }, isError: false } } })
+  assert.equal(h.phase(), 'blocked', '迟到的旧工具成功不能复活任务')
+})
+
+test('E6e 重复的失败终态是幂等的（不刷新成新任务）', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  const end = { type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'E' } } }, seq: 10, time: 1 }
+  h.reg.onEvent(session, end)
+  const first = h.row()
+  h.tick(5000)
+  h.reg.onEvent(session, end)
+  const second = h.row()
+  assert.equal(second.reason, first.reason)
+  assert.equal(second.stopCertain, true)
+  assert.equal(second.phase, 'blocked')
+})
+
+test('E6f 没有身份的错误不误绑定到当前任务', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 5 } })
+  // 旧轮（turn 2）的错误终止
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 2, reason: { kind: 'error', error: { code: 'OLD' } } } })
+  assert.notEqual(h.phase(), 'blocked', '旧轮错误不能污染当前轮')
+})
+
+test('E6g 带 turn 身份的旧轮 agent/error 不污染当前轮', () => {
+  const h = harness()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 5 } })
+  // 旧轮（turn 3）迟到的错误（宿主真实载荷带 turn/step）
+  h.reg.onAgent('s1', 'error', { turn: 3, step: 1, error: { code: 'OLD' } })
+  // 就算执行器随后停稳，也不能把旧轮错误升级成当前轮的停止
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.notEqual(h.phase(), 'blocked', '旧轮错误不得记到当前轮')
+  assert.equal(h.row().stopCertain, false)
 })
 
 test('E7 session/title 等无关事件不刷新执行活跃时间', () => {

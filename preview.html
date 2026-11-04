@@ -106,6 +106,28 @@
 <h2>动作规格（实时读 motion.js 的表）</h2>
 <div class="panel"><table id="specTable"></table></div>
 
+<h2>blocked 的进入条件（业务判定，不是动画）</h2>
+<div class="panel">
+  <p class="hint" style="margin-top:0">
+    本页是<strong>强制动画预览</strong>：按钮直接把某一态的动作放出来，用来核对几何与时序，
+    它<strong>不</strong>代表真实业务事件会让任务进入这一态。
+    真实业务链路里的 blocked 只表示「<strong>当前任务已被确认因错误停止</strong>」。
+  </p>
+  <table>
+    <tr><th>情形</th><th>真实业务链路里的结果</th></tr>
+    <tr><td>工具报错，Agent 继续分析或修复</td><td>thinking（诊断保留，不显示感叹号）</td></tr>
+    <tr><td>工具 A 失败，工具 B 仍在跑</td><td>working</td></tr>
+    <tr><td>工具失败后 Agent 发起提问</td><td>waiting</td></tr>
+    <tr><td>模型网络错误，自动重试退避/重试中</td><td>thinking</td></tr>
+    <tr><td>重试耗尽，宿主用 <code>turn/end</code> reason=error 终结本轮</td><td><strong>blocked</strong></td></tr>
+    <tr><td>认证/额度/服务错误使任务停止（同上终态）</td><td><strong>blocked</strong></td></tr>
+    <tr><td>用户主动取消</td><td>idle（不是错误停止）</td></tr>
+    <tr><td>原因不明的中断</td><td>idle（不伪造 blocked 或 done）</td></tr>
+    <tr><td>页面 <code>state.json</code> 请求失败 / 非法响应</td><td>保持上一份，不把会话判成 blocked</td></tr>
+    <tr><td>已确认停止后真正开始新一轮 / 恢复执行</td><td>按新事实显示，退出 blocked</td></tr>
+  </table>
+</div>
+
 <script type="module">
 import { TB_EXPRESSIONS, TB_SHAPES } from './src/grokbot/data.js'
 import { createBot, runBot, setBotInk } from './src/grokbot/engine.js'

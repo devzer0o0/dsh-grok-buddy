@@ -45,7 +45,20 @@ const SESSIONS = [
   { id: 'p-idle', phase: 'idle', reason: 'no-open-turn', detail: '', completionKey: '' },
   { id: 'p-working', phase: 'working', reason: 'tool:bash', detail: 'bash', completionKey: '' },
   { id: 'p-waiting', phase: 'waiting', reason: 'pending:question', detail: 'ask_user_question', completionKey: '' },
-  { id: 'p-blocked', phase: 'blocked', reason: 'error:RATE_LIMIT', detail: 'RATE_LIMIT', completionKey: '' },
+  // blocked 的 fixture 必须表达「任务已因错误停止」：只写 reason=error:RATE_LIMIT 只能
+  // 证明「见过一个错误码」，证明不了任务停止 —— 新规则下会被页面降级成 idle。
+  {
+    id: 'p-blocked',
+    phase: 'blocked',
+    reason: 'stop:RATE_LIMIT',
+    detail: 'RATE_LIMIT',
+    completionKey: '',
+    stopCertain: true,
+    stopSource: 'turn/end:error',
+    stopCode: 'RATE_LIMIT',
+    turnKey: 'p-blocked#7',
+    stopTurnKey: 'p-blocked#7',
+  },
   { id: 'p-thinking', phase: 'thinking', reason: 'model:generating', detail: '', completionKey: '' },
   { id: 'p-done', phase: 'done', reason: 'terminal-completed', detail: '', completionKey: 'p-done#1', completedAt: Date.now() },
 ]

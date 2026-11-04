@@ -109,7 +109,7 @@ test('等待优先于工具执行', () => {
   assert.equal(h.phase(), 'waiting')
 })
 
-test('当前有效错误是 blocked，后续成功把它救回来', () => {
+test('工具失败只是诊断：任务继续推进就绝不 blocked', () => {
   const h = registry()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c1', name: 'bash' } })
@@ -117,27 +117,106 @@ test('当前有效错误是 blocked，后续成功把它救回来', () => {
     type: 'tool/result',
     data: { turn: 1, message: { source: { callId: 'c1' }, isError: true, error: { code: 'ENOENT' } } },
   })
-  assert.equal(h.phase(), 'blocked')
+  // 每一个同步点都不能闪 blocked
+  assert.equal(h.phase(), 'thinking', '单工具失败后模型要继续推理')
+  assert.equal(h.snapshot().errorCode, 'ENOENT', '诊断仍然记录在案（只是不参与判定）')
   h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c2', name: 'bash' } })
+  assert.equal(h.phase(), 'working', '别的工具还在跑')
   h.reg.onEvent(session, { type: 'tool/result', data: { turn: 1, message: { source: { callId: 'c2' }, isError: false } } })
-  assert.equal(h.phase(), 'thinking', '历史错误不能永久霸占 blocked')
+  assert.equal(h.phase(), 'thinking')
 })
 
-test('致命错误压过挂起交互：agent 崩了，等人也没意义', () => {
+test('自动重试全程不进 blocked', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, {
+    type: 'llm/retry',
+    data: { turn: 1, step: 1, retry: 1, maxRetries: 5, retryId: 'r1', delayMs: 500, failure: { code: 'RATE_LIMIT' } },
+  })
+  assert.equal(h.phase(), 'thinking', '进入退避 = 仍在恢复，不是停止')
+  assert.equal(h.snapshot().retrying, true)
+  h.reg.onEvent(session, { type: 'llm/retry', data: { turn: 1, step: 1, retry: 2, retryId: 'r1', delayMs: 800, failure: { code: 'SERVER' } } })
+  assert.equal(h.phase(), 'thinking', '连续重试仍然有效')
+  h.reg.onEvent(session, { type: 'llm/retry-started', data: { turn: 1, step: 1, retry: 2, retryId: 'r1' } })
+  assert.equal(h.phase(), 'thinking', '重试真正开始')
+  h.reg.onEvent(session, { type: 'step/start', data: { turn: 1, step: 1 } })
+  h.reg.onStream('s1')
+  assert.equal(h.phase(), 'thinking', '重试成功后继续生成')
+})
+
+test('重试耗尽 + 权威错误终态才是 blocked', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'llm/retry', data: { turn: 1, step: 1, retry: 5, maxRetries: 5, retryId: 'r', failure: { code: 'RATE_LIMIT' } } })
+  assert.equal(h.phase(), 'thinking', '次数用尽本身不是停止证据')
+  h.reg.onEvent(session, {
+    type: 'turn/end',
+    data: { turn: 1, reason: { kind: 'error', error: { code: 'RATE_LIMIT', message: 'retries exhausted' } } },
+  })
+  assert.equal(h.phase(), 'blocked', '宿主用 turn/end reason=error 终结了这一轮')
+  assert.equal(h.snapshot().stopCertain, true)
+  assert.equal(h.snapshot().stopSource, 'turn/end:error')
+})
+
+test('重试等待中用户取消 → idle', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'llm/retry', data: { turn: 1, step: 1, retry: 1, retryId: 'r', failure: { code: 'RATE_LIMIT' } } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } } })
+  assert.equal(h.phase(), 'idle', '用户取消不是错误停止')
+  assert.equal(h.snapshot().stopCertain, false)
+})
+
+test('单独一条 agent/error 不足以 blocked（生命周期还没确认）', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c1', name: 'bash' } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  assert.equal(h.phase(), 'working', '可能在跑的并行工具不受影响；agent/error 不是停止证据')
+  assert.equal(h.snapshot().stopCertain, false)
+})
+
+test('agent/error + 系统原因中断 = blocked', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'x' } } } })
+  assert.equal(h.phase(), 'blocked', '错误 + 系统原因中断 = 任务级错误停止')
+})
+
+test('agent/error + 用户取消 = idle（不把用户取消算成错误）', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } } })
+  assert.equal(h.phase(), 'idle')
+})
+
+test('原因不明的中断既不 blocked 也不 done', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'interrupted' } } })
+  assert.equal(h.phase(), 'idle')
+})
+
+test('启动前致命失败：agent/error 后执行器停稳，仍然 blocked', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'AUTH' } })
+  assert.notEqual(h.phase(), 'blocked')
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked', '错误后执行器停稳且这一轮没留下 turn/end')
+  assert.equal(h.snapshot().stopSource, 'agent/error+agent/status:idle')
+})
+
+test('致命错误压过挂起交互：执行器已停，等人也没意义', () => {
   const h = registry()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.reg.onEvent(session, { type: 'approval/asked', data: { turn: 1, id: 'a1', toolName: 'write' } })
   h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
-  assert.equal(h.phase(), 'blocked')
-})
-
-test('重试归 blocked，重试真正开始后回到思考', () => {
-  const h = registry()
-  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
-  h.reg.onEvent(session, { type: 'llm/retry', data: { turn: 1, retry: 2, maxRetries: 5, failure: { code: 'RATE_LIMIT' } } })
-  assert.equal(h.phase(), 'blocked')
-  h.reg.onEvent(session, { type: 'llm/retry-started', data: { turn: 1, retry: 2 } })
-  assert.equal(h.phase(), 'thinking')
+  assert.equal(h.phase(), 'waiting', '错误还没被确认，旧的挂起审批仍然算 waiting')
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked', '确认停止后，残留的审批不能把 blocked 改回 waiting')
 })
 
 test('正常终态是 done，错误终态是 blocked，取消终态是 idle', () => {

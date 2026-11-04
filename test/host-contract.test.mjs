@@ -271,10 +271,29 @@ test('B13 旧轮 turn/end 不能清掉当前轮的提问', async (t) => {
   assert.equal((await h.state()).sessions[0].phase, 'waiting', '旧轮结束事件不得清掉当前轮的挂起提问')
 })
 
-test('B14 有效错误压过挂起提问', async (t) => {
+test('B14 未确认的 agent/error 不抢走挂起提问', async (t) => {
   const h = await mount(t)
   h.emitSessionEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.setProjection(rawState([openQuestion('q-err', true)], true))
   h.emitAgentError({ agent: { session: { id: 's1' } }, error: { code: 'BOOM' } })
-  assert.equal((await h.state()).sessions[0].phase, 'blocked')
+  const body = await h.state()
+  assert.equal(body.sessions[0].phase, 'waiting', '错误没被生命周期确认时，提问仍然有效')
+  assert.equal(body.sessions[0].stopCertain, false)
+})
+
+test('B14b 已确认的错误停止压过残留的挂起提问，并输出停止证据', async (t) => {
+  const h = await mount(t)
+  h.emitSessionEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.setProjection(rawState([openQuestion('q-err', true)], true))
+  h.emitSessionEvent(session, {
+    type: 'turn/end',
+    data: { turn: 1, reason: { kind: 'error', error: { code: 'QUOTA', message: 'no budget' } } },
+  })
+  const body = await h.state()
+  const row = body.sessions[0]
+  assert.equal(row.phase, 'blocked')
+  assert.equal(row.stopCertain, true)
+  assert.equal(row.stopSource, 'turn/end:error')
+  assert.equal(row.stopCode, 'QUOTA')
+  assert.equal(row.turnKey, 's1#1', '停止事实必须带当前轮身份，页面才能核验')
 })

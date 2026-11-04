@@ -37,9 +37,11 @@ test('六态集合严格', () => {
 test('历史输入名只在边界归一，不成为输出状态', () => {
   assert.equal(normalizePhaseInput('streaming'), 'thinking')
   assert.equal(normalizePhaseInput('tool'), 'working')
-  assert.equal(normalizePhaseInput('retry'), 'blocked')
-  assert.equal(normalizePhaseInput('error'), 'blocked')
   assert.equal(normalizePhaseInput('completed'), 'done')
+  // retry / error 已从历史表里移除：它们本身不证明「任务级错误停止」，
+  // 认不出来就退回 idle，绝不能借旧名字制造 blocked。
+  assert.equal(normalizePhaseInput('retry'), 'idle')
+  assert.equal(normalizePhaseInput('error'), 'idle')
   assert.equal(normalizePhaseInput('nonsense'), 'idle')
   assert.equal(normalizePhaseInput(undefined), 'idle')
   for (const legacy of Object.keys(LEGACY_PHASE_INPUT)) {
@@ -76,17 +78,54 @@ test('审批、提问、计划评审都归 waiting', () => {
   }
 })
 
-test('有效错误是 blocked，且压过挂起交互', () => {
+test('诊断错误本身不是 blocked', () => {
+  // 工具/请求报过错，但任务还在推进 → 仍然是 thinking
   const loud = facts({ turnOpen: true, error: { code: 'X' } })
-  assert.equal(decide(loud, { now: NOW }).phase, 'blocked')
+  assert.equal(decide(loud, { now: NOW }).phase, 'thinking', '有 error 不等于任务停止')
+  // 连挂起审批都没被「错误」抢走
   const both = facts({ turnOpen: true, error: { code: 'X' }, pendingInteraction: { kind: 'approval' } })
-  assert.equal(decide(both, { now: NOW }).phase, 'blocked', 'agent 崩了，等人也没意义')
+  assert.equal(decide(both, { now: NOW }).phase, 'waiting', '没确认停止时，等人就是等人')
 })
 
-test('成功终态是 done，错误终态是 blocked，取消终态是 idle', () => {
+test('已确认的任务级错误停止是 blocked，且压过挂起交互', () => {
+  const stop = { turnKey: 's1#1', source: 'turn/end:error', cause: 'error', code: 'NETWORK_ERROR', certain: true }
+  assert.equal(decide(facts({ turnOpen: false, stop }), { now: NOW }).phase, 'blocked')
+  const both = facts({ turnOpen: false, stop, pendingInteraction: { kind: 'approval' } })
+  assert.equal(decide(both, { now: NOW }).phase, 'blocked', '执行器已停，挂起的审批没有回答方')
+})
+
+test('暂定停止（没被生命周期确认）不能显示 blocked', () => {
+  const stop = { turnKey: 's1#1', source: 'agent/error', cause: 'error', code: 'BOOM', certain: false }
+  assert.equal(decide(facts({ turnOpen: true, stop }), { now: NOW }).phase, 'thinking')
+})
+
+test('旧轮的停止事实不污染当前轮', () => {
+  const stop = { turnKey: 's1#0', source: 'turn/end:error', cause: 'error', code: 'OLD', certain: true }
+  assert.equal(decide(facts({ turnOpen: true, stop }), { now: NOW }).phase, 'thinking')
+})
+
+test('成功终态是 done，已确认错误终态是 blocked，取消终态是 idle', () => {
   assert.equal(decide(facts({ terminal: { kind: 'completed', turnKey: 's1#1', completedAt: NOW } }), { now: NOW }).phase, 'done')
-  assert.equal(decide(facts({ terminal: { kind: 'error', turnKey: 's1#1' } }), { now: NOW }).phase, 'blocked')
+  const stop = { turnKey: 's1#1', source: 'turn/end:error', cause: 'error', code: 'QUOTA', certain: true }
+  assert.equal(decide(facts({ terminal: { kind: 'error', turnKey: 's1#1' }, stop }), { now: NOW }).phase, 'blocked')
   assert.equal(decide(facts({ terminal: { kind: 'interrupted', turnKey: 's1#1' } }), { now: NOW }).phase, 'idle')
+})
+
+test('自动重试有效时是 thinking，不是 blocked', () => {
+  const f = facts({
+    turnOpen: true,
+    modelPhase: 'requested',
+    error: { code: 'RATE_LIMIT', kind: 'retry' },
+    retry: { turnKey: 's1#1', retryId: 'r1', retry: 1, scheduledAt: NOW, nextAttemptAt: NOW + 500, inFlight: false },
+  })
+  const v = decide(f, { now: NOW })
+  assert.equal(v.phase, 'thinking')
+  assert.match(v.reason, /retry/)
+})
+
+test('静默只降级为 idle，也永不推出 blocked', () => {
+  const f = facts({ turnOpen: true, error: { code: 'NETWORK_ERROR' }, lastActivityAt: NOW - TURN_SILENCE_TTL_MS - 1 })
+  assert.equal(decide(f, { now: NOW }).phase, 'idle', '没输出不是错误停止的证据')
 })
 
 test('活跃 done 保持 done（不因静默阈值降级）', () => {

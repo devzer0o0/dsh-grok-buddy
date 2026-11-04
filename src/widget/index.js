@@ -340,6 +340,18 @@ function boot() {
    * @param {object} surface 表面识别结果。
    * @returns {{phase: string, reason: string, entry: object|null, completionKey: string, consumed: boolean, observedAt: number|undefined, dshState: string|null}}
    */
+  /**
+   * blocked 证据不足时的来源标记（只用于诊断，不是状态）。
+   * @param {string} source 融合来源。
+   * @param {boolean} known 登记表里有没有这个会话。
+   * @returns {string} 诊断来源。
+   */
+  function blockedEvidenceSource(source, known) {
+    if (known !== true) return 'blocked-unknown-session'
+    if (source === 'dsh') return 'blocked-dsh-without-evidence'
+    return 'blocked-without-evidence'
+  }
+
   function displayOf(surface, shared) {
     const sessionId = surface.sessionId
     // 同一会话的语义只算一次：状态来源优先取本轮预计算的共享结果
@@ -359,8 +371,16 @@ function boot() {
       row: surface.host,
       nativeDone: view.nativeDone,
       reason: known && typeof entry.reason === 'string' ? entry.reason : '',
+      // blocked 的可信度只看证据，不看相位名：页面侧不能比宿主更早「确认停止」。
+      stopCertain: view.blockedCertain === true,
     })
     let phase = merged.phase
+    // 宿主给了 blocked 但证据不足（旧宿主 / 旧缓存 / 缺字段）→ 降级为 idle，
+    // 原因保留在 reason 里。绝不凭空生成另一种运行状态。
+    if (phase === 'blocked' && view.blockedCertain !== true) {
+      phase = 'idle'
+      merged.source = blockedEvidenceSource(merged.source, known)
+    }
     // 消费/失活必须参与**最终展示相位**，不只是颜色：
     // 已消费的完成就是 idle，绝不能留着 phase=done 继续 celebrate。
     if (phase === 'done' && consumed) phase = 'idle'
@@ -397,6 +417,18 @@ function boot() {
     const entry = byId.get(sessionId)
     const known = entry !== undefined
     const rawPhase = known ? normalizePhaseInput(entry.phase) : 'idle'
+    /**
+     * 宿主说 blocked，**必须**带任务级停止证据才认。
+     *
+     * 旧宿主只会给一个 phase='blocked'（或更旧的 retry/error 名称），没有
+     * stopCertain 这类证据字段。那种快照不能冒充「已确认的错误停止」——
+     * 证据不足就降级为 idle，并把原因留在 reason 里供诊断。
+     */
+    const blockedCertain =
+      rawPhase === 'blocked' &&
+      entry !== undefined &&
+      entry.stopCertain === true &&
+      (entry.stopTurnKey === '' || entry.turnKey === '' || entry.stopTurnKey === entry.turnKey)
     // 原生 done 由 DOM 适配层单独读，这里先占位（多表面时取「任一表面说过 done」）
     const nativeDone = nativeDoneSessions.has(sessionId) === true
     const hostPhase = rawPhase
@@ -420,7 +452,16 @@ function boot() {
       const gen = nativeCompletions.get(sessionId)
       lifecycleKey = bindLifecycleKey(sessionId, lifecycleKey, completionKey !== '', gen === undefined ? 0 : gen.generation)
     }
-    return { sessionId, known, rawPhase, entry: known ? entry : null, completionKey: lifecycleKey, nativeDone, lifecycleKey }
+    return {
+      sessionId,
+      known,
+      rawPhase,
+      entry: known ? entry : null,
+      completionKey: lifecycleKey,
+      nativeDone,
+      lifecycleKey,
+      blockedCertain,
+    }
   }
 
   /**
@@ -728,7 +769,9 @@ function boot() {
       //   · 宿主快照说在跑（working / thinking / waiting / blocked）；
       //   · DSH 自己画在行里的状态点走到 ongoing / warning —— 对**未知会话**
       //     （state.json 里从来没有它）这是唯一证据，不能漏。
-      const hostActive = rawPhase === 'working' || rawPhase === 'thinking' || rawPhase === 'waiting' || rawPhase === 'blocked'
+      // blocked 是「执行已经停下、等人处理」，它**不是**新的执行活动：
+      // 把它算成活跃证据会让完成代数误推进、让旧 done 被复活。
+      const hostActive = rawPhase === 'working' || rawPhase === 'thinking' || rawPhase === 'waiting'
       const nativeRaw = nativeStateById.get(surface.sessionId)
       const nativeActive = nativeRaw === 'ongoing' || nativeRaw === 'warning'
       noteNativeCompletion(surface.sessionId, nativeDone, hostActive || nativeActive, Date.now())
@@ -1116,6 +1159,15 @@ function boot() {
         detail: typeof item.detail === 'string' ? item.detail : '',
         completedAt: typeof item.completedAt === 'number' ? item.completedAt : undefined,
         completionKey: typeof item.completionKey === 'string' ? item.completionKey : '',
+        // 任务级错误停止的**证据**（不是状态）：页面靠它核验 blocked 是否可信。
+        // 缺字段 = 旧宿主 / 旧缓存，按「没有证据」处理（见 dsh-state.js）。
+        stopCertain: item.stopCertain === true,
+        stopSource: typeof item.stopSource === 'string' ? item.stopSource : '',
+        stopCode: typeof item.stopCode === 'string' ? item.stopCode : '',
+        stopTurnKey: typeof item.stopTurnKey === 'string' ? item.stopTurnKey : '',
+        turnKey: typeof item.turnKey === 'string' ? item.turnKey : '',
+        errorCode: typeof item.errorCode === 'string' ? item.errorCode : '',
+        retrying: item.retrying === true,
       })
     }
     // 非空但一条都认不出：这份快照不可信，保留上一份（别把整排脸清成灰）

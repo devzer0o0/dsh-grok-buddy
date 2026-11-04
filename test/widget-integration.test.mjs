@@ -307,8 +307,24 @@ function doneRow(id, completionKey, completedAt) {
   }
 }
 
+/**
+ * 一行宿主快照。
+ *
+ * blocked 必须带**任务级错误停止证据**（stopCertain + stopSource + 轮次身份）：
+ * 新规则下没有证据的 blocked 会被页面降级为 idle，所以 fixture 不能只写一个
+ * 相位名 —— 那正是旧语义「有 error 就是 blocked」剩下的写法。
+ */
 function phaseRow(id, phase, extra) {
-  return { id, phase, reason: 'test', detail: '', ...(extra === undefined ? {} : extra) }
+  const base = { id, phase, reason: 'test', detail: '', ...(extra === undefined ? {} : extra) }
+  if (phase === 'blocked' && base.stopCertain === undefined) {
+    base.stopCertain = true
+    base.stopSource = 'turn/end:error'
+    base.stopCode = 'QUOTA'
+    base.turnKey = id + '#1'
+    base.stopTurnKey = id + '#1'
+    if (base.reason === 'test') base.reason = 'stop:QUOTA'
+  }
+  return base
 }
 
 test('构建产物能真的 boot 起来，并把头像挂进 16px 前导位', async () => {
@@ -1040,5 +1056,153 @@ test('搜索行缺少稳定身份时不猜，只记 unidentifiable', async () =>
   assert.equal(botOf(slot), undefined, '搜索结果行没有稳定身份时不得插入头像')
   const probe = h.window.__dshGrokBuddy.probe()
   assert.equal(probe.unidentifiableSearch, 1, '要如实记账')
+  h.api.stop()
+})
+// ── blocked 的新语义：只有「任务级错误停止」才显示感叹号 ──────────────────
+
+/** 读一帧的图层可见性（看真实图层，不看动作名）。 */
+function figuresOf(slot) {
+  const svg = botOf(slot)
+  if (svg === undefined || svg === null) return null
+  const shown = (name) => {
+    const el = svg.querySelector('[data-dsgb-layer="' + name + '"]')
+    if (el === null) return false
+    // 两个真实来源：内联 style.display（引擎用）与 display 属性。
+    if (el.style !== undefined && el.style.display === 'none') return false
+    if (typeof el.getAttribute === 'function' && el.getAttribute('display') === 'none') return false
+    return true
+  }
+  return {
+    phase: svg.getAttribute('data-dsgb-phase'),
+    motion: svg.getAttribute('data-dsgb-motion'),
+    bang: shown('bang'),
+    body: shown('body'),
+    dots: shown('dots'),
+  }
+}
+
+/** 逐帧采样：每一步都检查，绝不只看最终结论。 */
+async function sampleSteps(h, slot, steps) {
+  const out = []
+  for (const step of steps) {
+    h.setState(step.body)
+    await h.tick(step.ms === undefined ? 550 : step.ms)
+    // 图层由动画帧推进：必须真的走几帧，才看得到这一态的实际绘制
+    await h.frame(6)
+    out.push({ label: step.label, figure: figuresOf(slot) })
+  }
+  return out
+}
+
+test('可恢复错误全过程：诊断错误 + 自动重试 + 恢复，从不出现 blocked 感叹号', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, section, 's1', false)
+  const seq = await sampleSteps(h, slot, [
+    { label: '开始', body: sessionsBody([phaseRow('s1', 'thinking', { reason: 'model:requested' })]) },
+    {
+      label: '工具失败（局部）',
+      body: sessionsBody([phaseRow('s1', 'thinking', { reason: 'model:requested', errorCode: 'ENOENT' })]),
+    },
+    {
+      label: '另一工具仍在跑',
+      body: sessionsBody([phaseRow('s1', 'working', { reason: 'tool:bash', detail: 'bash', errorCode: 'ENOENT' })]),
+    },
+    {
+      label: '进入重试退避',
+      body: sessionsBody([
+        phaseRow('s1', 'thinking', { reason: 'model:requested:retry', retrying: true, errorCode: 'RATE_LIMIT' }),
+      ]),
+    },
+    {
+      label: '重试开跑',
+      body: sessionsBody([phaseRow('s1', 'thinking', { reason: 'model:requested:retry', retrying: true })]),
+    },
+    { label: '恢复生成', body: sessionsBody([phaseRow('s1', 'thinking', { reason: 'model:generating' })]) },
+    { label: '成功完成', body: sessionsBody([doneRow('s1', 's1#1', h.now)]) },
+  ])
+  for (const step of seq) {
+    assert.notEqual(step.figure.phase, 'blocked', step.label + '：不该出现 blocked')
+    assert.equal(step.figure.bang, false, step.label + '：感叹号图层不得可见')
+  }
+  assert.equal(seq[seq.length - 1].figure.phase, 'done', '最后按真实事实进入完成')
+  h.api.stop()
+})
+
+test('致命停止：宿主确认 stopped-by-error → 感叹号；恢复后退出', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, section, 's1', false)
+  h.setState(sessionsBody([phaseRow('s1', 'working', { reason: 'tool:bash' })]))
+  await h.tick(550)
+  assert.equal(figuresOf(slot).phase, 'working')
+
+  // 宿主用 turn/end reason=error 终结这一轮，并把证据放进快照
+  h.setState(sessionsBody([phaseRow('s1', 'blocked')]))
+  await h.tick(550)
+  // 进入 blocked 是 480ms 的收缩形变：要推进足够帧，稳态才没有头像
+  await h.frame(45)
+  const dead = figuresOf(slot)
+  assert.equal(dead.phase, 'blocked', '任务确实因错误停止')
+  assert.equal(dead.bang, true, '实际感叹号图层必须可见')
+  assert.equal(dead.body, false)
+
+  // 真正恢复：新一轮开始
+  h.setState(sessionsBody([phaseRow('s1', 'thinking', { reason: 'model:requested', turnKey: 's1#2' })]))
+  await h.tick(550)
+  // 退出也要走完过渡帧，才看得到真实的稳态图层
+  await h.frame(45)
+  const alive = figuresOf(slot)
+  assert.equal(alive.phase, 'thinking')
+  assert.equal(alive.bang, false, '恢复后要退出 blocked')
+  h.api.stop()
+})
+
+test('旧宿主只给 blocked 名字、没有停止证据：不冒充已确认错误停止', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, section, 's1', false)
+  // 刻意不带 stopCertain / stopSource：这就是旧快照
+  h.setState(sessionsBody([{ id: 's1', phase: 'blocked', reason: 'error:RATE_LIMIT', detail: 'RATE_LIMIT' }]))
+  await h.tick(550)
+  const figure = figuresOf(slot)
+  assert.notEqual(figure.phase, 'blocked', '没有语义保证的旧 blocked 不能直接显示')
+  assert.equal(figure.bang, false, '也不能留下感叹号图层')
+  h.api.stop()
+})
+
+test('已确认停止不会被残留的原生 done/ongoing 覆盖', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { row, slot } = makeRow(h.doc, section, 's1', false)
+  const dot = row.children[0].children[0]
+  h.setState(sessionsBody([phaseRow('s1', 'blocked')]))
+  await h.tick(550)
+  await h.frame(8)
+  assert.equal(figuresOf(slot).phase, 'blocked')
+  // DOM 上残留的宿主状态点说 ongoing：不能把已确认的停止冲掉
+  dot.setAttribute('data-state', 'ongoing')
+  await h.tick(550)
+  await h.frame(8)
+  assert.equal(figuresOf(slot).phase, 'blocked')
+  assert.equal(figuresOf(slot).bang, true)
+  h.api.stop()
+})
+
+test('blocked 不推进完成代数、不触发 celebrate', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, section, 's1', false)
+  h.setState(sessionsBody([doneRow('s1', 's1#1', h.now)]))
+  await h.tick(550)
+  assert.equal(figuresOf(slot).phase, 'done')
+  // 完成之后收到错误停止：不能把 done 变成新执行/新完成
+  h.setState(sessionsBody([phaseRow('s1', 'blocked')]))
+  await h.tick(550)
+  assert.equal(figuresOf(slot).phase, 'blocked')
+  // 再回到真实新完成：仍是新的一轮，能重新庆祝
+  h.setState(sessionsBody([doneRow('s1', 's1#2', h.now)]))
+  await h.tick(550)
+  assert.equal(figuresOf(slot).phase, 'done')
   h.api.stop()
 })

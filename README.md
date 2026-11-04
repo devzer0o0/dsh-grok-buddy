@@ -69,29 +69,49 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 | idle | 空闲 | 默认；没有在途任务；或完成展示已结束/已被消费 |
 | working | 正在处理 | 会话活跃，且**当前任务还有未结束的工具调用** |
 | waiting | 正在等待 | 会话活跃，且有未解决的**审批、提问或计划评审** |
-| blocked | 已阻止 | 当前任务或需处理的交互仍活跃，且存在**有效**错误 |
+| blocked | 已阻止 | **当前任务已被确认因错误而停止**，且该停止尚未被真实恢复或新一轮取代 |
 | thinking | 思考 | 会话活跃，处于模型请求/推理/生成阶段，且无更高优先级事实 |
 | done | 完成 | 当前轮有明确的**成功**终态，且完成展示仍活跃、未被消费 |
 
+### blocked = 任务级错误停止（不是「有错误」）
+
+一句话定义：**当前会话的当前任务已被确认因错误停止执行，且这个停止事实还没有被
+真实恢复执行或新一轮任务取代。**
+
+它明确**不**表示：出现过错误 / 有一条 error 记录 / 某个工具调用失败 / 模型正在自动重试 /
+暂时没有输出 / 网络看起来异常 / 用户主动取消。
+
+事实分三层，代码里也分开存（lib/fold.js）：
+
+| 层 | 字段 | 作用 |
+| --- | --- | --- |
+| A. 错误诊断 | facts.error | 某次工具/请求/重试报了什么错。**只用于日志与 tooltip，不参与判定** |
+| B. 自动恢复 | facts.retry | 当前轮是否仍有有效的重试调度/正在重试。让任务保持 thinking |
+| C. 任务级停止 | facts.stop | 哪一轮、因什么错、由哪个权威事实确认停下。**只有它能推出 blocked** |
+
 ### 判定顺序（不可交换）
 
-1. **终态优先**。当前轮已有明确终态时：
-   completed → done（若已消费/已失活则 idle，**完成事实不删除**）；
-   error / blocked → blocked；aborted / max-tokens / 未知 → idle。
-2. **未结束任务**：有效错误 → blocked；挂起交互 → waiting；未结束工具 → working；
-   模型阶段 → thinking；其余 → thinking（刚起步）。
-3. **静默只降级为 idle**，且只在没有任何在途证据时生效。**永远不拿沉默冒充成功。**
+1. **当前有效成功终态** → done（若已消费/已失活则 idle，**完成事实不删除**）。
+2. **当前有效任务级错误停止** → blocked。
+3. **当前有效非错误结束**（取消 / 截断 / 未知）→ idle。
+4. 未终止且有挂起交互 → waiting。
+5. 未终止且有未结束工具 → working。
+6. 未终止且模型在跑**或自动重试仍有效** → thinking。
+7. 其余（含静默）→ idle。**沉默既不冒充 done，也不冒充 blocked。**
 
 几条明确的边界：
 
 * **仅模型输出、仅 agent running、仅等网络响应，都不等于 working。** working 只留给
   真正在运行的工具调用。模型吐字属于 thinking。
-* **致命错误压过挂起交互**：DSH 里 agent/error 表示 agent 已崩，此时挂起的审批/提问
-  已经没有回答方，留成 waiting 会把「等人」误导成「还能答」。
-* **历史工具错误不会永久 blocked**：后续成功的工具结果、新一轮开始、agent 恢复运行，
-  都会清掉同轮的旧错误。
-* **重试不是独立状态**，按当前错误或恢复执行事实归入六态。
-* **完成展示失活,不等于忘记**：终态事实与展示状态分开保存。
+* **工具失败只是诊断**：一个工具报错、别的工具还在跑、Agent 继续分析、编译/测试失败后
+  继续修复，都是 working / thinking，绝不闪 blocked。
+* **自动重试不是停止**：进入退避、连续重试、重试开跑，全程 thinking；只有重试耗尽
+  **并且**宿主用权威终态（`turn/end` reason=error/blocked）终结这一轮，才 blocked。
+* **已确认的停止压过挂起交互**：执行器已经停下时，残留的审批/提问没有回答方；
+  但**未确认**的停止绝不抢走 waiting。
+* **用户取消不是错误停止**：`turn/end` reason=aborted 且 cause 是 user → idle。
+* **静默与断线都不产生 blocked**。
+* **完成展示失活，不等于忘记**：终态事实与展示状态分开保存。
 
 ### waiting 覆盖的真实来源
 
@@ -419,6 +439,27 @@ GET 返回 200 但 probe 为 null **不算**链路通 —— 那表示没开窗�
 * lib/fold.js 把这些折成**事实**（不产出状态名）
 * src/decision.js 用事实 + 展示输入算出**六态**（唯一决策表）
 * 暴露 GET /dsh-grok-buddy/state.json，并在页面 head 注入 /dsh-grok-buddy/widget.js
+
+### 「任务级错误停止」的真实来源
+
+全部取自宿主真实契约，没有自造事件名：
+
+| 来源 | 真实事实 | 为什么可信 |
+| --- | --- | --- |
+| `turn/end` reason.error | `TurnEndReasonMap.error = { kind:'error'; error: LlmFailure }` | 执行器把这一轮**记录为**错误终态：会话日志里它就是这一轮的结局 |
+| `turn/end` reason.blocked | `TurnEndReasonMap.blocked`（preStep 被 reject） | 这一轮不可能再继续 |
+| `agent/error` + 系统原因 `turn/end` | `reason.kind='aborted'` 且 `reason.reason.kind` ∈ {parent, hook, legacy} | 宿主先报错、随后以**非用户**原因中断；用户取消（`kind:'user'`）被明确排除 |
+| `agent/error` + `agent/status=idle` | 执行器停稳，且这一轮没有留下 `turn/end` | 覆盖「启动阶段致命失败」：真实链条是 turn/start → throwError(agent/error) → finally 里 turn/end 写入失败 → 走到这里 |
+
+**单独一条 `agent/error` 不算停止**：其它插件也用这个事件汇报非致命问题（例如持久化
+flush 失败），所以它只写「暂定停止」，等上面的生命周期事实确认后才升级成 blocked。
+
+`llm/retry` / `llm/retry-started` 不是停止证据：它们证明**自动恢复仍在进行**，任务保持
+thinking。
+
+页面不再「看见 blocked 就画出感叹号」：快照里带 `stopCertain / stopSource / stopCode /
+stopTurnKey`，没有这些证据的（旧宿主、旧缓存、旧 `error`/`retry` 相位名）会降级为 idle
+并保留诊断原因。
 * 暴露 GET/POST /dsh-grok-buddy/colors.json、probe.json、probe-control.json
 
 注入走两条路：webserver/index-inject 结构化注入行（桌面版唯一受支持的方式），

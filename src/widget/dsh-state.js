@@ -10,8 +10,10 @@
  *
  * 融合规则（不是「有值就优先」，也不是「DSH 说 done 就永远覆盖」）：
  *
- *   1. 我们有**强证据**（working / waiting / blocked / thinking）→ 用我们的。
+ *   1. 我们有**强证据**（working / waiting / thinking）→ 用我们的。
  *      DSH 那个点只有四档，分不出「在跑工具」和「在想」。
+ *      ⚠️ blocked **不在**「无条件优先」之列：它必须带任务级停止证据
+ *      （stopCertain）才可信，否则旧宿主/旧缓存的 blocked 会冒充已确认停止。
  *   2. DSH 说 done、我们也说 done → done（一致）。
  *   3. 我们说 idle 但 DSH 说 done：只有**该完成记录未被消费**时才采信 DSH。
  *      已消费的完成记录，DSH 遗留的 done 不能让它重新庆祝。
@@ -33,7 +35,7 @@ const STATE_MAP = Object.freeze({
 })
 
 /** 我们自己能分辨得更细、需要压过 DSH 粗粒度信号的状态。 */
-const OURS_WINS = new Set(['working', 'thinking', 'waiting', 'blocked'])
+const OURS_WINS = new Set(['working', 'thinking', 'waiting'])
 
 /**
  * 宿主判定理由里表示「有过完成、但展示周期已经结束」的那些。
@@ -86,6 +88,7 @@ export function fallbackPhase(row) {
  * @param {boolean} [input.consumed] 这条完成记录是否已被消费。
  * @param {string} [input.completionKey] 当前完成身份。
  * @param {Element} input.row 会话行（读 DSH 状态点）。
+ * @param {boolean} [input.stopCertain] 是否有可信的任务级错误停止证据。
  * @returns {{phase: string, source: string, dshState: string|null}} 融合结果与来源。
  */
 export function mergePhase(input) {
@@ -99,6 +102,13 @@ export function mergePhase(input) {
 
   // 1) 我们的强证据优先
   if (OURS_WINS.has(ours)) return { phase: ours, source: 'plugin', dshState: raw }
+  // 1b) blocked 只在**有停止证据**时才压过 DSH 的粗粒度信号。
+  //     没有证据的 blocked 交给调用方降级（这里不凭空造出别的状态）。
+  if (ours === 'blocked') {
+    return opts.stopCertain === true
+      ? { phase: 'blocked', source: 'plugin', dshState: raw }
+      : { phase: 'idle', source: 'blocked-without-evidence', dshState: raw }
+  }
 
   // 2) 都说完成
   if (ours === 'done' && dshState === 'done') return { phase: 'done', source: 'agree', dshState: raw }
