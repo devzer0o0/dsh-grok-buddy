@@ -154,6 +154,22 @@ test('重启（重新 apply 一次）之后颜色还在', async (t) => {
   assert.equal(JSON.parse(Buffer.concat(chunks).toString('utf8')).projects['proj-a'], '#00bca6')
 })
 
+test('写盘失败时 POST 回 500：页面能据此回滚，不会假装成功', async (t) => {
+  const { request, colorsPath, file } = await mount(t)
+  // 先落一个能用的旧色
+  await request('POST', colorsPath, { workspaceId: 'proj-a', color: '#9159fe' })
+  // 把配色文件路径占成一个目录 → rename 失败
+  fs.rmSync(file)
+  fs.mkdirSync(file)
+  const res = await request('POST', colorsPath, { workspaceId: 'proj-a', color: '#ff263c' })
+  assert.equal(res.status, 500)
+  assert.equal(res.json.ok, false)
+  assert.match(res.json.error, /写不进去/)
+  // 内存表也回到旧值：后续 GET 与重启读到的都是旧色
+  const get = await request('GET', colorsPath)
+  assert.equal(get.json.projects['proj-a'], '#9159fe')
+})
+
 test('POST 非法颜色被拒（400），已有表不受影响', async (t) => {
   const { request, colorsPath } = await mount(t)
   await request('POST', colorsPath, { workspaceId: 'proj-a', color: '#1084fe' })

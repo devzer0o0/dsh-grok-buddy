@@ -12,7 +12,16 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { closestSection, isSection, projectIdOf, workspaceRowOf } from '../src/widget/dom.js'
+import {
+  closestSection,
+  collectWorkspaceFolders,
+  folderSlotOf,
+  isSection,
+  projectIdOf,
+  workspaceIdOfRow,
+  workspaceRowOf,
+} from '../src/widget/dom.js'
+import { Doc } from './dom-harness.mjs'
 
 /** 一个够用的元素桩：只要能爬 parentElement 和按选择器找后代。 */
 function el(className, attrs, children) {
@@ -140,4 +149,103 @@ test('isSection 只认 groupSection 类名', () => {
 test('projectIdOf 对 null / undefined 不炸', () => {
   assert.equal(projectIdOf(null), '')
   assert.equal(projectIdOf(undefined), '')
+})
+
+// ── 项目行身份与原生文件夹图标（workspaceIdOfRow / folderSlotOf / collectWorkspaceFolders）──
+
+/**
+ * 照 dsh-client-ui-workspace 的 ProjectRowItem 抄一份真实项目行：
+ *   div[data-row-key="workspace:…"]
+ *     > span.slot.folder(.folderActive) > svg   ← 原生文件夹
+ *     > span.slot.chevron > svg.arrow           ← 展开箭头（hover 时顶替文件夹）
+ *     > span.projectText > span.title           ← 标题
+ *     > span.rowActions                         ← ⋯ 菜单 + 新建会话
+ */
+function projectRow(doc, workspaceId, options) {
+  const opts = options === undefined ? {} : options
+  const row = doc.createElement('div')
+  row.setAttribute('data-row-key', 'workspace:' + workspaceId)
+  row.setAttribute('role', 'treeitem')
+  row.setAttribute('aria-expanded', opts.expanded === false ? 'false' : 'true')
+  const folder = doc.createElement('span')
+  folder.className = 'JoiKIa_slot JoiKIa_folder' + (opts.active === true ? ' JoiKIa_folderActive' : '')
+  const folderSvg = doc.createElement('svg')
+  const folderPath = doc.createElement('path')
+  folderPath.setAttribute('stroke', 'currentColor')
+  folderSvg.appendChild(folderPath)
+  folder.appendChild(folderSvg)
+  const chevron = doc.createElement('span')
+  chevron.className = 'JoiKIa_slot JoiKIa_chevron'
+  const arrow = doc.createElement('svg')
+  arrow.className = 'JoiKIa_arrow'
+  chevron.appendChild(arrow)
+  const text = doc.createElement('span')
+  text.className = 'JoiKIa_projectText'
+  const title = doc.createElement('span')
+  title.className = 'JoiKIa_title'
+  title.textContent = opts.title === undefined ? workspaceId : opts.title
+  text.appendChild(title)
+  const actions = doc.createElement('span')
+  actions.className = 'JoiKIa_rowActions'
+  const more = doc.createElement('button')
+  more.setAttribute('aria-label', '⋯')
+  actions.appendChild(more)
+  row.appendChild(folder)
+  row.appendChild(chevron)
+  row.appendChild(text)
+  row.appendChild(actions)
+  return { row, folder, chevron, title }
+}
+
+test('workspaceIdOfRow：项目行身份只从 data-row-key 正面读', () => {
+  const doc = new Doc()
+  const made = projectRow(doc, 'proj-a')
+  assert.equal(workspaceIdOfRow(made.row), 'proj-a')
+  // 未分组桶：workspace: 后面是空串，也是合法身份
+  const ungrouped = projectRow(doc, '')
+  assert.equal(workspaceIdOfRow(ungrouped.row), '')
+  // 会话行、别的行、空输入都不是项目行
+  assert.equal(workspaceIdOfRow({ getAttribute: () => 'session:s1' }), null)
+  assert.equal(workspaceIdOfRow({ getAttribute: () => null }), null)
+  assert.equal(workspaceIdOfRow(null), null)
+  assert.equal(workspaceIdOfRow(undefined), null)
+})
+
+test('folderSlotOf：只认前导的 slot+folder 那格，箭头/标题/菜单都不认', () => {
+  const doc = new Doc()
+  const made = projectRow(doc, 'proj-a')
+  assert.equal(folderSlotOf(made.row), made.folder)
+  assert.equal(folderSlotOf(made.row) === made.chevron, false, '不能认到箭头那格')
+  // 宿主「含当前会话」时给文件夹格加 folderActive，身份不变
+  const active = projectRow(doc, 'proj-b', { active: true })
+  assert.equal(folderSlotOf(active.row), active.folder)
+  // 没有文件夹位（结构变了 / 没渲染）：如实返回 null，不猜第一个 SVG
+  const bare = doc.createElement('div')
+  bare.setAttribute('data-row-key', 'workspace:proj-c')
+  bare.appendChild(doc.createElement('span'))
+  assert.equal(folderSlotOf(bare), null)
+  assert.equal(folderSlotOf(null), null)
+})
+
+test('collectWorkspaceFolders：按行身份枚举，认不出的跳过，不依赖会话', () => {
+  const doc = new Doc()
+  const a = projectRow(doc, 'proj-a')
+  const b = projectRow(doc, 'proj-b', { expanded: false })
+  const ungrouped = projectRow(doc, '')
+  const bare = doc.createElement('div')
+  bare.setAttribute('data-row-key', 'workspace:proj-d') // 没渲染文件夹位 → 跳过
+  const search = doc.createElement('div') // 搜索结果行没有 workspace 行身份
+  search.setAttribute('class', 'searchResultRow')
+  doc.body.appendChild(a.row)
+  doc.body.appendChild(b.row)
+  doc.body.appendChild(ungrouped.row)
+  doc.body.appendChild(bare)
+  doc.body.appendChild(search)
+  const found = collectWorkspaceFolders(doc)
+  assert.deepEqual(
+    found.map((item) => item.workspaceId),
+    ['proj-a', 'proj-b', ''],
+    '折叠与否、有无会话都枚举到；认不出的行跳过',
+  )
+  assert.equal(found[0].folder, a.folder)
 })

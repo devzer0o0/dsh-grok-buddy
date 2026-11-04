@@ -1,7 +1,8 @@
 /**
  * 注入到页面的样式表。
  *
- * 这一份只做三件事：把 DSH 前导位里的原生状态点藏掉、把头像摆进去、
+ * 这一份只做四件事：把 DSH 前导位里的原生状态点藏掉、把头像摆进去、
+ * 给项目行的原生文件夹图标提供项目色（只改 color，见 folderInkStyles）、
  * 并给调色板与菜单项一点自己的外观。单独成模块是为了能被单测直接断言。
  *
  * 布局踩过的坑（值得钉死）：
@@ -65,6 +66,29 @@ export function paletteStyles() {
       'padding:8px 14px;border-radius:8px;background:rgba(20,22,26,.92);color:#fff;' +
       'font:13px/18px "PingFang SC",system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.28)}',
   ].join('\n')
+}
+
+/**
+ * 项目行**原生文件夹**的项目色规则。
+ *
+ * DSH 的文件夹图标 SVG 全部走 currentColor（open 版 fill="currentColor"、
+ * close 版 stroke="currentColor"），所以着色只需要把图标位（span.slot.folder）
+ * 的 color 换成插件 CSS 变量里的项目墨色 —— 尺寸、占位、viewBox、路径、
+ * 描边宽度、开合造型、填充层次全部保持宿主原样。
+ *
+ * 两条宿主规则都必须被压过（同为单类 0,1,0）：
+ *   .slot{color:label-tertiary}            ← 平时的灰
+ *   .folderActive{color:business-primary}   ← 含当前会话时的宿主蓝
+ * 所以属性选择器写两遍（0,2,0），不碰 !important，也不在项目行上设 color
+ * （标题、按钮、菜单不受影响）。
+ *
+ * @param {string} folderAttr 标记文件夹位的插件属性名（不带括号）。
+ * @param {string} inkVar 提供项目墨色的 CSS 变量名。
+ * @returns {string} CSS 文本。
+ */
+export function folderInkStyles(folderAttr, inkVar) {
+  const sel = '[' + folderAttr + '][' + folderAttr + ']'
+  return sel + '{color:var(' + inkVar + ')}'
 }
 
 /**

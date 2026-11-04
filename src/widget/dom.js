@@ -78,6 +78,75 @@ export function workspaceRowOf(section) {
   return null
 }
 
+/** 项目行 data-row-key 的前缀。 */
+const WORKSPACE_KEY_PREFIX = 'workspace:'
+
+/**
+ * 从**项目行自身**读 workspaceId（data-row-key="workspace:<id>"）。
+ *
+ * 这是项目身份的正面入口；projectIdOf() 解决的是另一件事 ——「一条**会话**行
+ * 属于哪个项目」。两者不要混用：projectIdOf 对项目行自己会给出错误的归属。
+ *
+ * @param {Element} row 候选行。
+ * @returns {string|null} workspaceId（未分组是空串）；不是项目行返回 null。
+ */
+export function workspaceIdOfRow(row) {
+  if (row === null || row === undefined || typeof row.getAttribute !== 'function') return null
+  const key = row.getAttribute('data-row-key')
+  if (typeof key !== 'string' || key.startsWith(WORKSPACE_KEY_PREFIX) !== true) return null
+  return key.slice(WORKSPACE_KEY_PREFIX.length)
+}
+
+/**
+ * 项目行前导的**原生文件夹**图标位。
+ *
+ * DSH 的项目行结构（dsh-client-ui-workspace/lib/client.js 的 ProjectRowItem）：
+ *
+ *   div[data-row-key="workspace:…"][role=treeitem]
+ *     > span.slot.folder[.folderActive]   ← 原生文件夹图标（open/close 两种 SVG）
+ *     > span.slot.chevron > svg.arrow     ← 展开箭头（hover 时顶替文件夹）
+ *     > span.projectText > span.title     ← 标题
+ *     > span.rowActions                   ← ⋯ 菜单 + 新建会话按钮
+ *
+ * 所以只认「直接子节点里 class 同时含 slot 与 folder 片段」的那一个 span：
+ * 箭头（slot+chevron）、菜单与新建按钮（rowActions）、标题（projectText）都不会命中。
+ * 认不出（结构变了 / 没渲染文件夹）就返回 null，绝不按「第一个 SVG」猜。
+ *
+ * @param {Element} row 项目行。
+ * @returns {Element|null} 文件夹图标位。
+ */
+export function folderSlotOf(row) {
+  if (row === null || row === undefined || row.children === undefined) return null
+  for (const child of row.children) {
+    if (hasClassPart(child, 'slot') && hasClassPart(child, 'folder')) return child
+  }
+  return null
+}
+
+/**
+ * 枚举当前页面上**可识别**的项目文件夹（项目行的原生文件夹位）。
+ *
+ * 只按项目行自身的 data-row-key 认身份：标题、顺序、第几个子节点、当前选中
+ * 会话都不参与。认不出的行如实跳过（不猜、不扩大选择器）。这不依赖会话记录
+ * 存在 —— 折叠项目、空项目一样会被枚举到。
+ *
+ * @param {Document} doc 文档。
+ * @returns {{workspaceId: string, row: Element, folder: Element}[]} 文件夹目标。
+ */
+export function collectWorkspaceFolders(doc) {
+  const out = []
+  if (doc === null || doc === undefined || typeof doc.querySelectorAll !== 'function') return out
+  const selector = '[data-row-key^="' + WORKSPACE_KEY_PREFIX + '"]'
+  for (const row of doc.querySelectorAll(selector)) {
+    const workspaceId = workspaceIdOfRow(row)
+    if (workspaceId === null) continue
+    const folder = folderSlotOf(row)
+    if (folder === null) continue
+    out.push({ workspaceId, row, folder })
+  }
+  return out
+}
+
 /**
  * 会话行属于哪个项目。
  * @param {Element} row 会话行。

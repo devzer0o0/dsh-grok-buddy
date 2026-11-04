@@ -131,6 +131,28 @@ test('写盘是原子的：不会留下 tmp 文件', (t) => {
   assert.deepEqual(leftovers, [])
 })
 
+test('写盘失败不再被吞：set 返回失败、内存表恢复成磁盘上的旧值', (t) => {
+  const { store: made, file, warnings } = store(t)
+  assert.deepEqual(made.set('proj-a', '#9159fe'), { ok: true, color: '#9159fe' })
+
+  // 让 colors.json 这个路径变成一个目录：tmp 写得进去，rename 一定失败
+  fs.rmSync(file)
+  fs.mkdirSync(file)
+  const failed = made.set('proj-a', '#ff263c', '/Users/x/y')
+  assert.equal(failed.ok, false, '写盘失败要暴露给调用方')
+  assert.equal(failed.status, 500, '带上可路由的状态码')
+  assert.match(failed.error, /写不进去/)
+  assert.ok(warnings.some((m) => /写不进配色文件/.test(m)), '保留原有 warn')
+  // 内存表恢复成磁盘上仍然生效的那份：重启前后都还是旧色
+  assert.equal(made.get('proj-a'), '#9159fe')
+  assert.deepEqual(made.snapshot().paths, {})
+
+  // 恢复默认同样受保护
+  const failedClear = made.set('proj-a', null)
+  assert.equal(failedClear.ok, false)
+  assert.equal(made.get('proj-a'), '#9159fe', '清不掉就是清不掉，不出现「成功但丢了」')
+})
+
 test('sanitizeProjects 只留字符串键 + 合法颜色', () => {
   const out = sanitizeProjects({ a: '#FFFFFF', b: 'purple', c: 'x', d: 1 }, normalizeColor)
   assert.deepEqual(out, { a: '#ffffff', b: '#9159fe' })

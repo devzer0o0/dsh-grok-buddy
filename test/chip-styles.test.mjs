@@ -6,14 +6,18 @@
  *      图标一起隐形了 —— 侧栏只剩一个色点。
  *   2. 修好图标后，圆点本身还是用户不想要的东西（文件夹前面只该有图标）。
  *
- * 所以现在的约定是：**不再注入任何圆点**，文件夹格子保持 DSH 原样。
- * 这里钉死：样式表里不能出现会渲染出来的圆点，且必须有清理残留的兜底。
+ * 所以现在的约定是：**不再注入任何圆点**，文件夹那一格的布局保持 DSH 原样
+ * （图标、尺寸、占位都不动）。新需求只允许改一件事：文件夹图标本身的颜色
+ * 跟随项目身份色（与 Buddy 同源），且必须走 folderInkStyles 这条受限通道。
+ *
+ * 这里钉死：样式表里不能出现会渲染出来的圆点，必须有清理残留的兜底，
+ * 且文件夹规则只许改 color。
  *
  * @module test/chip-styles.test
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { paletteStyles } from '../src/widget/styles.js'
+import { folderInkStyles, paletteStyles } from '../src/widget/styles.js'
 
 const css = paletteStyles()
 
@@ -43,4 +47,26 @@ test('全局没有任何 opacity:0 / visibility:hidden，别再把图标藏掉',
   assert.doesNotMatch(css, /opacity:\s*0\b/)
   assert.doesNotMatch(css, /visibility:\s*hidden/)
   assert.doesNotMatch(css, /dsgb-chip-slot\s*>\s*svg/)
+})
+
+// ── 文件夹项目色：只允许走 folderInkStyles 这条受限通道 ─────────────────────
+
+const FOLDER_ATTR = 'data-dsgb-workspace-folder'
+const FOLDER_INK_VAR = '--dsgb-workspace-ink'
+const folderCss = folderInkStyles(FOLDER_ATTR, FOLDER_INK_VAR)
+
+test('文件夹着色规则只声明 color，布局（尺寸/定位/显示）一概不碰', () => {
+  const body = /\{([^}]*)\}/.exec(folderCss)
+  assert.ok(body !== null, '规则要有声明块')
+  const decls = body[1].split(';').map((part) => part.trim()).filter(Boolean)
+  assert.deepEqual(decls, ['color:var(' + FOLDER_INK_VAR + ')'], '只许一条 color 声明')
+})
+
+test('文件夹着色选择器写在标记属性上（写两遍压过宿主单类规则），不碰整行', () => {
+  const sel = /^([^\{]+)\{/.exec(folderCss)[1].trim()
+  assert.equal(sel, '[' + FOLDER_ATTR + '][' + FOLDER_ATTR + ']', '双属性选择器，特异度 0,2,0')
+  assert.doesNotMatch(folderCss, /!important/, '不用 !important')
+  assert.doesNotMatch(folderCss, /projectRow|rowActions|title/, '不许把规则扩到行、按钮或标题')
+  // 颜色来自插件变量，不写死某个色值
+  assert.doesNotMatch(folderCss, /#[0-9a-f]{3,8}\b/i, '不许硬编码颜色')
 })

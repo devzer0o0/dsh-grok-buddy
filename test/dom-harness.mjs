@@ -11,6 +11,29 @@
  * @module test/dom-harness
  */
 
+/**
+ * CSSStyleDeclaration 的最小桩：支持 CSS 变量（setProperty/removeProperty），
+ * 普通属性赋值走 JS 字段（与浏览器不同但测试够用）。
+ */
+export class StyleStub {
+  constructor() {
+    this._props = new Map()
+  }
+
+  setProperty(name, value) {
+    this._props.set(String(name), String(value))
+  }
+
+  removeProperty(name) {
+    this._props.delete(String(name))
+  }
+
+  getPropertyValue(name) {
+    const value = this._props.get(String(name))
+    return value === undefined ? '' : value
+  }
+}
+
 /** 一个元素。 */
 export class El {
   constructor(tag, doc) {
@@ -19,7 +42,7 @@ export class El {
     this.children = []
     this.parentElement = null
     this.attributes = new Map()
-    this.style = {}
+    this.style = new StyleStub()
     this.dataset = {}
     this._text = ''
     this._listeners = new Map()
@@ -137,10 +160,21 @@ export class El {
     if (this._listeners.has(type)) this._listeners.get(type).delete(handler)
   }
 
-  /** 只用于测试：触发一次事件。 */
+  /** 浏览器同义 API：触发该类型的监听（capture / bubble 不分）。 */
+  dispatchEvent(event) {
+    // 真实事件的 target 一定是节点；桩事件没给就补上自己。
+    if (event !== null && event !== undefined && event.target === undefined) event.target = this
+    this.fire(event.type, event)
+    return true
+  }
+
+  /** 只用于测试：触发一次事件（事件对象补齐 stopPropagation/preventDefault）。 */
   fire(type, event) {
     if (!this._listeners.has(type)) return
-    for (const handler of [...this._listeners.get(type)]) handler(event === undefined ? { target: this } : event)
+    const base = event === undefined ? { target: this } : event
+    if (typeof base.stopPropagation !== 'function') base.stopPropagation = () => {}
+    if (typeof base.preventDefault !== 'function') base.preventDefault = () => {}
+    for (const handler of [...this._listeners.get(type)]) handler(base)
   }
 
   listenerCount(type) {
@@ -269,6 +303,11 @@ export class Doc {
     el.namespaceURI = ns
     if (tag === 'svg') el.classNameIsObject = false
     return el
+  }
+
+  /** 旧式事件工厂（widget 的 closeMenus 用它合成一次外部点击）。 */
+  createEvent() {
+    return { type: 'click', initMouseEvent() {} }
   }
 
   querySelector(selector) {

@@ -22,15 +22,15 @@ import { TB_EXPRESSIONS, TB_SHAPES } from './grokbot/data.js'
 import { createBot, runBot, setBotInk } from './grokbot/engine.js'
 import { LIFECYCLE, PHASE_TEXT, PHASE_TO_MOTION, SURFACE, surfaceOf, themeOf } from './mapping.js'
 import { IDENTITY_INKS, UNGROUPED_KEY, defaultInk, inkOfProject, normalizeColor, storeKey } from './palette.js'
-import { collectSurfaces } from './dom.js'
+import { collectSurfaces, collectWorkspaceFolders } from './dom.js'
 import { dshRawStateOf, fallbackPhase, mergePhase } from './dsh-state.js'
 import { COOLDOWN_MS, isActive, inkForRow } from './activity.js'
 import { freshMemory, resolveMotion } from './celebrate.js'
 import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '../decision.js'
-import { paletteStyles, slotStyles } from './styles.js'
+import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04-motion3'
+const BUILD = '2026-11-04-folder-ink'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
@@ -45,6 +45,10 @@ const BOT_CLASS = 'dsgb-bot'
 const SLOT_ATTR = 'data-dsgb-slot'
 const ROW_ATTR = 'data-dsgb-row'
 const PROJECT_ATTR = 'data-dsgb-project'
+/** 标记「这是已被插件着色的项目文件夹位」；stop 时按它精确回收。 */
+const FOLDER_ATTR = 'data-dsgb-workspace-folder'
+/** 项目文件夹位上的项目墨色变量（folderInkStyles 的 color 从这里取）。 */
+const FOLDER_INK_VAR = '--dsgb-workspace-ink'
 /** 项目行 ⋯ 菜单的容器（DSH 的 Menu 用 portal 挂到 body）。 */
 const MENU_SURFACE = '[data-menu-material]'
 /** 头像边长：与 DSH 原生 16px 前导位逐像素对齐。 */
@@ -97,6 +101,14 @@ function boot() {
   const mounted = new WeakMap()
   /** 已挂载记录表（要按项目批量重刷，WeakMap 遍历不了） */
   const records = new Set()
+  /**
+   * 项目文件夹位 → 上次写入的 { ws, ink }。
+   *
+   * 只在「身份或墨色真的变了」时写 DOM（标记属性 + CSS 变量），
+   * 每次同步的重复扫描因此是只读的。键是 DOM 节点：节点从项目 A 复用为
+   * 项目 B 时，ws 变了 → 重写；节点被移除时在同步里释放（Map 会钉住节点）。
+   */
+  const folderInks = new Map()
   /**
    * 完成生命周期表（按**完成身份**记，不按会话）。
    *
@@ -614,6 +626,56 @@ function boot() {
       if (record.project !== workspaceId) continue
       paint(record, record.phase)
     }
+    // 头像与文件夹走同一个重刷入口：改色、回滚都一次性把两边对齐。
+    syncFolders()
+  }
+
+  /**
+   * 项目文件夹着色：给每个可识别的项目文件夹位打标记 + 写项目墨色变量。
+   *
+   * 与头像共用同一个取色入口（inkFor → inkOfProject）：同项目、同主题、
+   * 同背景下，文件夹主轮廓与彩色 Buddy 的主体是同一个颜色。文件夹持续
+   * 表达项目身份 —— 不随某个子会话的运行状态变灰（灰色规则只属于 Buddy）。
+   *
+   * 不依赖会话记录：折叠项目、空项目同样着色。认不出的行跳过，不猜。
+   * 自己写入的属性不在 observer 的过滤里，不会形成循环刷新。
+   */
+  function syncFolders() {
+    if (stopped) return
+    const targets = collectWorkspaceFolders(document)
+    const seen = new Set()
+    for (const target of targets) {
+      seen.add(target.folder)
+      const surface = surfaceOf(target.folder, dark)
+      const ink = inkFor(target.workspaceId, surface)
+      const prev = folderInks.get(target.folder)
+      if (prev !== undefined && prev.ws === target.workspaceId && prev.ink === ink) continue
+      if (target.folder.getAttribute(FOLDER_ATTR) !== '1') target.folder.setAttribute(FOLDER_ATTR, '1')
+      writeFolderInk(target.folder, ink)
+      folderInks.set(target.folder, { ws: target.workspaceId, ink })
+    }
+    // 节点被移除：释放记录；仍在文档里但已不再是可识别文件夹（宿主重渲染
+    // 挪走了它）：摘掉插件标记，把外观还给宿主。
+    for (const el of [...folderInks.keys()]) {
+      if (seen.has(el)) continue
+      folderInks.delete(el)
+      if (el.isConnected) clearFolderInk(el)
+    }
+  }
+
+  /** 写项目墨色变量（只动这一个变量，宿主其余内联样式不碰）。 */
+  function writeFolderInk(el, ink) {
+    if (el.style !== null && el.style !== undefined && typeof el.style.setProperty === 'function') {
+      el.style.setProperty(FOLDER_INK_VAR, ink)
+    }
+  }
+
+  /** 摘掉插件给文件夹位的全部痕迹。 */
+  function clearFolderInk(el) {
+    el.removeAttribute(FOLDER_ATTR)
+    if (el.style !== null && el.style !== undefined && typeof el.style.removeProperty === 'function') {
+      el.style.removeProperty(FOLDER_INK_VAR)
+    }
   }
 
   /** 主题切换：重新判定深浅，并把所有已挂上的头像按新主题重刷。 */
@@ -700,6 +762,9 @@ function boot() {
       const label = labelOf(display.phase, display.entry !== null && typeof display.entry.detail === 'string' ? display.entry.detail : '')
       writeAccessibility(record, slot, display.phase, label)
     }
+
+    // 项目文件夹与头像同一轮同步：不依赖会话记录，折叠项目、空项目也覆盖。
+    syncFolders()
   }
 
   /**
@@ -1018,6 +1083,8 @@ function boot() {
           for (const record of [...records]) {
             if (record.inst.svg.isConnected) paint(record, record.phase)
           }
+          // 文件夹与头像一起吃新配色表（其他窗口改色 / 自定义色被删都算）。
+          syncFolders()
         }
       })
       .catch(() => {})
@@ -1103,7 +1170,12 @@ function boot() {
     if (existing !== null) existing.remove()
     const style = document.createElement('style')
     style.setAttribute('data-dsh-grok-buddy', 'style')
-    style.textContent = slotStyles(BOT_CLASS, SLOT_ATTR, BOT_SIZE, { reduce }) + '\n' + paletteStyles()
+    style.textContent =
+      slotStyles(BOT_CLASS, SLOT_ATTR, BOT_SIZE, { reduce }) +
+      '\n' +
+      paletteStyles() +
+      '\n' +
+      folderInkStyles(FOLDER_ATTR, FOLDER_INK_VAR)
     document.head.appendChild(style)
   }
 
@@ -1284,7 +1356,9 @@ function boot() {
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: ['aria-selected', 'class'],
+    // data-row-key：宿主复用行节点换项目时（A 行变 B 行），文件夹要当场换色，
+    // 不等下一次轮询。展开/折叠换文件夹 SVG 走 childList，不用加 aria-expanded。
+    attributeFilter: ['aria-selected', 'class', 'data-row-key'],
   })
   onDispose(() => observer.disconnect())
 
@@ -1374,6 +1448,17 @@ function boot() {
     colors() {
       return { ...colors }
     },
+    /** 当前已识别的项目文件夹与它用的墨色（诊断 / 验收用）。 */
+    folders() {
+      return collectWorkspaceFolders(document).map((target) => {
+        const applied = folderInks.get(target.folder)
+        return {
+          workspaceId: target.workspaceId,
+          marked: target.folder.getAttribute(FOLDER_ATTR) === '1',
+          ink: applied === undefined ? null : applied.ink,
+        }
+      })
+    },
     /** 当前所有完成的消费状态（诊断用）。 */
     completions() {
       return [...completions.keys()].map((key) => {
@@ -1427,6 +1512,11 @@ function boot() {
       for (const el of document.querySelectorAll('[' + ROW_ATTR + ']')) {
         el.removeAttribute(ROW_ATTR)
         el.removeAttribute(PROJECT_ATTR)
+      }
+      // 文件夹外观还给宿主：只摘插件自己的标记与变量，不动宿主其它内联样式。
+      folderInks.clear()
+      for (const el of document.querySelectorAll('[' + FOLDER_ATTR + ']')) {
+        clearFolderInk(el)
       }
       delete window.__dshGrokBuddy
       delete window.__dshGrokBuddyProbe
