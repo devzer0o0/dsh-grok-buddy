@@ -60,6 +60,7 @@ export function paletteStyles() {
       'display:block;width:100%;margin-top:8px;height:26px;border-radius:6px;cursor:pointer;' +
       'border:none;background:transparent;color:inherit;opacity:.65;font:inherit;text-align:left;padding:0 2px}',
     '.dsgb-palette-reset:hover{opacity:1}',
+    '.dsgb-palette-hint{font-size:12px;line-height:16px;opacity:.55;margin:2px 0 0 2px}',
     '.dsgb-palette-feedback{min-height:16px;margin-top:6px;font-size:12px;color:#ff263c}',
     '.dsgb-color-error{' +
       'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483001;' +

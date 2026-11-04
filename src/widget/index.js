@@ -30,7 +30,7 @@ import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '.
 import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04-tri-dot-scale'
+const BUILD = '2026-11-04-folder-native-default'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
@@ -104,9 +104,10 @@ function boot() {
   /**
    * 项目文件夹位 → 上次写入的 { ws, ink }。
    *
-   * 只在「身份或墨色真的变了」时写 DOM（标记属性 + CSS 变量），
-   * 每次同步的重复扫描因此是只读的。键是 DOM 节点：节点从项目 A 复用为
-   * 项目 B 时，ws 变了 → 重写；节点被移除时在同步里释放（Map 会钉住节点）。
+   * **只有显式配置过颜色的项目才会有记录**：没有配置的项目文件夹保持 DSH
+   * 原生颜色，插件不标记、不写变量。记录用来避免重复写 DOM（每次同步的重复
+   * 扫描因此是只读的）。键是 DOM 节点：节点从项目 A 复用为项目 B 时，ws 变了
+   * → 重写；节点被移除时在同步里释放（Map 会钉住节点）。
    */
   const folderInks = new Map()
   /**
@@ -238,9 +239,25 @@ function boot() {
     return true
   }
 
-  /** 项目墨色（身份色本身）。 */
+  /** 项目墨色（身份色本身）。Buddy 没有显式配置时按既有规则回落到哈希默认色。 */
   function inkFor(workspaceId, surface) {
     return inkOfProject(workspaceId, dark, colors, surface)
+  }
+
+  /**
+   * 项目**显式**选定的墨色：只认配色表里这个键自己的有效值。
+   *
+   * 这是本次默认行为的分界线 ——「未设置」不等于「哈希默认色」：
+   *   · 这里返回 null = 用户从没选过（或配置里是坏值）→ 文件夹保持 DSH 原生色；
+   *   · 返回 hex = 用户明确选过 → 文件夹用这个项目色。
+   * 用户选的色即使恰好等于 defaultInk(workspaceId)，也仍然算「已设置」，
+   * 所以判断只看向量里有没有有效值，绝不比较颜色是否等于哈希色。
+   *
+   * @param {string} workspaceId 项目 key（未分组是空串）。
+   * @returns {string|null} 规范化 hex；没有有效显式配置时返回 null。
+   */
+  function explicitInk(workspaceId) {
+    return normalizeColor(colors[storeKey(workspaceId)])
   }
 
   /** 一行最终该用的墨色：活跃 / 选中 → 项目色；否则灰。 */
@@ -672,13 +689,18 @@ function boot() {
   }
 
   /**
-   * 项目文件夹着色：给每个可识别的项目文件夹位打标记 + 写项目墨色变量。
+   * 项目文件夹着色：**只给显式选过颜色的项目**打标记 + 写项目墨色变量。
    *
-   * 与头像共用同一个取色入口（inkFor → inkOfProject）：同项目、同主题、
-   * 同背景下，文件夹主轮廓与彩色 Buddy 的主体是同一个颜色。文件夹持续
-   * 表达项目身份 —— 不随某个子会话的运行状态变灰（灰色规则只属于 Buddy）。
+   * 默认（没设过颜色）文件夹保持 DSH 原生颜色 —— 宿主自己决定普通态、
+   * 含当前会话时的 folderActive、明暗主题，以及它以后任何样式变化。
+   * 插件此时不写任何东西，所以「恢复默认」只要撤销覆盖，宿主 CSS 立刻
+   * 重新生效，并且继续随宿主变化（不是把某个颜色写回去）。
    *
-   * 不依赖会话记录：折叠项目、空项目同样着色。认不出的行跳过，不猜。
+   * 有显式配置时与头像共用同一个取色入口（inkFor → inkOfProject）：同项目、
+   * 同主题、同背景下，文件夹主轮廓与彩色 Buddy 的主体是同一个颜色。文件夹
+   * 持续表达项目身份 —— 不随某个子会话的运行状态变灰（灰色规则只属于 Buddy）。
+   *
+   * 不依赖会话记录：折叠项目、空项目同样处理。认不出的行跳过，不猜。
    * 自己写入的属性不在 observer 的过滤里，不会形成循环刷新。
    */
   function syncFolders() {
@@ -687,6 +709,15 @@ function boot() {
     const seen = new Set()
     for (const target of targets) {
       seen.add(target.folder)
+      // 先判「有没有显式配置」再做任何缓存/墨色判断：
+      // 无覆盖时的清理不能被下面的「墨色没变就跳过」提前返回挡掉。
+      if (explicitInk(target.workspaceId) === null) {
+        folderInks.delete(target.folder)
+        // 缓存里可能已经没有这个节点了（复用、卸载重挂、别的窗口刚删配置），
+        // 所以清理依据是**节点上的残留**，不是 Map 里的记录。
+        if (hasFolderInk(target.folder)) clearFolderInk(target.folder)
+        continue
+      }
       const surface = surfaceOf(target.folder, dark)
       const ink = inkFor(target.workspaceId, surface)
       const prev = folderInks.get(target.folder)
@@ -702,6 +733,17 @@ function boot() {
       folderInks.delete(el)
       if (el.isConnected) clearFolderInk(el)
     }
+  }
+
+  /** 文件夹位上是否还残留插件的痕迹（标记或颜色变量）。 */
+  function hasFolderInk(el) {
+    if (el.getAttribute(FOLDER_ATTR) !== null) return true
+    return (
+      el.style !== null &&
+      el.style !== undefined &&
+      typeof el.style.getPropertyValue === 'function' &&
+      el.style.getPropertyValue(FOLDER_INK_VAR) !== ''
+    )
   }
 
   /** 写项目墨色变量（只动这一个变量，宿主其余内联样式不碰）。 */
@@ -926,7 +968,14 @@ function boot() {
     box.className = 'dsgb-palette'
     box.setAttribute('role', 'dialog')
     box.setAttribute('aria-label', '项目颜色')
-    const current = inkOfProject(workspaceId, dark, colors)
+    /**
+     * 显式选过的颜色；没选过是 null。
+     *
+     * 「未设置」和「选了恰好等于哈希默认色的色」必须分开：前者不该把任何
+     * 色块标成已选、也不该把输入框填成默认色（打开调色板本身不产生配置）。
+     */
+    const chosen = explicitInk(workspaceId)
+    const current = chosen === null ? defaultInk(workspaceId) : chosen
 
     const head = document.createElement('div')
     head.className = 'dsgb-palette-head'
@@ -942,7 +991,8 @@ function boot() {
       swatch.style.background = item.ink
       swatch.title = item.name
       swatch.setAttribute('aria-label', item.name)
-      if (item.ink.toLowerCase() === current.toLowerCase()) swatch.classList.add('is-on')
+      // 只有**用户选过**的色才标成已选；未设置时一个都不标。
+      if (chosen !== null && item.ink.toLowerCase() === current.toLowerCase()) swatch.classList.add('is-on')
       swatch.addEventListener('click', () => applyColor(workspaceId, item.ink))
       grid.appendChild(swatch)
     }
@@ -952,10 +1002,10 @@ function boot() {
     custom.className = 'dsgb-palette-custom'
     const input = document.createElement('input')
     input.type = 'text'
-    input.placeholder = '#9159FE'
+    // 未设置时不预填哈希默认色：那会看起来像「已经选了它」。
+    input.placeholder = chosen === null ? '未设置（自定义 hex）' : '#9159FE'
     input.className = 'dsgb-hex'
-    input.value = current
-    input.setAttribute('aria-label', '自定义颜色 hex')
+    input.value = chosen === null ? '' : chosen
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') submit()
     })
@@ -988,9 +1038,15 @@ function boot() {
     const reset = document.createElement('button')
     reset.type = 'button'
     reset.className = 'dsgb-palette-reset'
-    reset.textContent = '恢复默认（' + defaultInk(workspaceId) + '）'
+    // 不再把文件夹默认颜色描述成一个固定色值：文件夹跟随 DSH，Buddy 才有默认项目色。
+    reset.textContent = '恢复默认'
+    reset.setAttribute('aria-label', '恢复默认（文件夹跟随 DSH，Buddy 使用默认项目色）')
+    const resetHint = document.createElement('div')
+    resetHint.className = 'dsgb-palette-hint'
+    resetHint.textContent = '文件夹跟随 DSH，Buddy 使用默认项目色。'
     reset.addEventListener('click', () => applyColor(workspaceId, null))
     box.appendChild(reset)
+    box.appendChild(resetHint)
 
     if (dark) {
       box.style.background = '#22262c'
@@ -1500,7 +1556,13 @@ function boot() {
     colors() {
       return { ...colors }
     },
-    /** 当前已识别的项目文件夹与它用的墨色（诊断 / 验收用）。 */
+    /**
+     * 当前已识别的项目文件夹与它的着色状态（诊断 / 验收用）。
+     *
+     * marked / ink 只在**用户显式选过颜色**时才有值；chosen 是配色表里这一项
+     * 的显式值（未设置为 null）。没有覆盖时 marked=false、ink=null，
+     * 文件夹由宿主 CSS 决定颜色。
+     */
     folders() {
       return collectWorkspaceFolders(document).map((target) => {
         const applied = folderInks.get(target.folder)
@@ -1508,6 +1570,7 @@ function boot() {
           workspaceId: target.workspaceId,
           marked: target.folder.getAttribute(FOLDER_ATTR) === '1',
           ink: applied === undefined ? null : applied.ink,
+          chosen: explicitInk(target.workspaceId),
         }
       })
     },

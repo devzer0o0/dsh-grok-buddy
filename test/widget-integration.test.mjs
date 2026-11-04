@@ -752,6 +752,14 @@ function folderInkOf(folder) {
   return folder.style.getPropertyValue(FOLDER_VAR)
 }
 
+/** 一个 hex 对应的预设色名（用来点对应色块）。 */
+function nameOfInk(hex) {
+  const names = { '#1084fe': '蓝', '#9159fe': '紫', '#ff9800': '橙', '#ff309b': '粉', '#ff6700': '橙红', '#97683d': '赭', '#00bca6': '青', '#ff263c': '红' }
+  const found = names[hex.toLowerCase()]
+  if (found === undefined) throw new Error('不是预设色: ' + hex)
+  return found
+}
+
 /** 头像身体墨色（engine 把项目墨色写进 body path 的 fill）。 */
 function botBodyFill(slot) {
   const bot = botOf(slot)
@@ -794,37 +802,53 @@ function clickColorEntry(h) {
   holder.querySelector('button').fire('click')
 }
 
-test('项目文件夹默认用 workspaceId 哈希色，标记 + 变量都落在文件夹位上', async () => {
+test('项目文件夹默认保持 DSH 原生色：没有插件标记，也不写颜色变量', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
   await h.tick(600)
-  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1', '文件夹位要有插件标记')
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-a'), '默认色 = 哈希默认色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), null, '没有显式配置时不得打插件标记')
+  assert.equal(folderInkOf(made.folder), '', '没有显式配置时不得写插件颜色变量')
   const chevron = made.row.children.find((child) => String(child.getAttribute('class') || '').indexOf('chevron') !== -1)
   assert.equal(chevron.getAttribute(FOLDER_MARK), null, '箭头那格不得被标记')
   assert.equal(made.title.getAttribute(FOLDER_MARK), null, '标题不得被标记')
+  // 宿主自己的 class 一个都不能动：folderActive 等状态类是原生颜色的来源
+  assert.match(String(made.folder.getAttribute('class')), /folderActive|JoiKIa_folder/)
+  const report = h.api.folders()
+  assert.equal(report.length, 1)
+  assert.equal(report[0].marked, false)
+  assert.equal(report[0].ink, null)
+  assert.equal(report[0].chosen, null, '诊断里能看出「未设置」')
   h.api.stop()
 })
 
-test('折叠项目、没有会话的项目同样着色（不依赖会话记录）', async () => {
+test('折叠项目、空项目、未分组同样不被着色（不依赖会话记录）', async () => {
   const h = await boot()
   const collapsed = makeFolderSection(h.doc, 'proj-empty', { collapsed: true })
+  const ungrouped = makeFolderSection(h.doc, '', { title: '未分组' })
   await h.tick(600)
-  assert.equal(collapsed.folder.getAttribute(FOLDER_MARK), '1')
-  assert.equal(folderInkOf(collapsed.folder), defaultInk('proj-empty'))
+  for (const made of [collapsed, ungrouped]) {
+    assert.equal(made.folder.getAttribute(FOLDER_MARK), null)
+    assert.equal(folderInkOf(made.folder), '')
+  }
+  // 显式配置后（未分组用保留键）才着色，且跟着轮询生效
+  h.setColors({ ok: true, projects: { __ungrouped__: '#00bca6' } })
+  await h.tick(2000)
+  assert.equal(folderInkOf(ungrouped.folder), '#00bca6')
+  assert.equal(folderInkOf(collapsed.folder), '', '没配置的项目仍保持原生')
   h.api.stop()
 })
 
-test('不同项目各用各的色；同名标题也不会串色，改标题不变色', async () => {
+test('显式选色后各用各的色；同名标题也不会串色，改标题不变色', async () => {
   const h = await boot()
   const a = makeFolderSection(h.doc, 'proj-a', { title: '同名' })
   const b = makeFolderSection(h.doc, 'proj-b', { title: '同名' })
-  await h.tick(600)
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe', 'proj-b': '#00bca6' } })
+  await h.tick(2000)
   const inkA = folderInkOf(a.folder)
   const inkB = folderInkOf(b.folder)
-  assert.equal(inkA, defaultInk('proj-a'))
-  assert.equal(inkB, defaultInk('proj-b'))
-  assert.equal(inkA === inkB, defaultInk('proj-a') === defaultInk('proj-b'), '身份由 key 决定，不由标题决定')
+  assert.equal(inkA, '#9159fe')
+  assert.equal(inkB, '#00bca6')
+  assert.notEqual(inkA, inkB, '身份由 key 决定，不由标题决定')
   // 重命名：标题文本变了，色不变
   a.title.textContent = '新名字'
   await h.tick(600)
@@ -832,37 +856,54 @@ test('不同项目各用各的色；同名标题也不会串色，改标题不�
   h.api.stop()
 })
 
-test('未分组桶（workspace: 空串）也有自己的默认色，可单独改色', async () => {
+test('用户选的色恰好等于哈希默认色，仍算已设置：文件夹继续着色', async () => {
   const h = await boot()
-  const made = makeFolderSection(h.doc, '')
+  const made = makeFolderSection(h.doc, 'proj-a')
+  const same = defaultInk('proj-a')
   await h.tick(600)
-  assert.equal(folderInkOf(made.folder), defaultInk(''))
-  // 走保留键改色后轮询生效
-  h.setColors({ ok: true, projects: { __ungrouped__: '#00bca6' } })
+  assert.equal(folderInkOf(made.folder), '', '前提：未设置时是原生色')
+  // 走真实交互选一个「恰好等于哈希默认色」的色
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  clickColorEntry(h)
+  const swatch = paletteButton(h, '[aria-label="' + nameOfInk(same) + '"]')
+  swatch.fire('click')
+  await h.settle()
+  assert.equal(
+    h.fetchLog.filter((entry) => entry.method === 'POST' && entry.url.indexOf('/colors.json') !== -1).length,
+    1,
+    '要真的写进配置',
+  )
+  assert.equal(folderInkOf(made.folder), same, '与哈希默认同值的显式选择仍要着色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1')
+  // 轮询回来的配色表里确实有这一项
+  h.setColors({ ok: true, projects: { 'proj-a': same } })
   await h.tick(2000)
-  assert.equal(folderInkOf(made.folder), '#00bca6')
+  assert.equal(folderInkOf(made.folder), same, '轮询后依然是显式色，不回原生')
   h.api.stop()
 })
 
-test('轮询拿到新配色表：文件夹与应显彩色的 Buddy 一起更新，删掉自定义色一起回默认', async () => {
+test('轮询拿到新配色表：显式色 → 文件夹与彩色 Buddy 同步；别的窗口删掉配置 → 文件夹回原生、Buddy 回哈希默认', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
   const { slot } = makeRow(h.doc, made.section, 's1', false)
   h.setState(sessionsBody([phaseRow('s1', 'working')]))
   await h.tick(600)
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-a'))
-  assert.equal(botBodyFill(slot), defaultInk('proj-a'), '前提：彩色 Buddy 用同一个墨色')
+  assert.equal(folderInkOf(made.folder), '', '未配置时不写文件夹色')
+  assert.equal(botBodyFill(slot), defaultInk('proj-a'), 'Buddy 仍按既有规则用哈希默认色')
 
   h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
   await h.tick(2000)
   assert.equal(folderInkOf(made.folder), '#9159fe', '文件夹跟新配色')
   assert.equal(botBodyFill(slot), '#9159fe', 'Buddy 同步跟新配色')
 
-  // 别的窗口把自定义色删了：两边一起回哈希默认
+  // 别的窗口把自定义色删了：文件夹还给宿主，Buddy 回哈希默认
   h.setColors({ ok: true, projects: {} })
   await h.tick(2000)
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-a'))
-  assert.equal(botBodyFill(slot), defaultInk('proj-a'))
+  assert.equal(folderInkOf(made.folder), '', '文件夹恢复原生（插件变量撤掉）')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), null, '插件标记也要撤掉')
+  assert.equal(botBodyFill(slot), defaultInk('proj-a'), 'Buddy 保持既有默认规则')
+  assert.equal(h.api.folders()[0].marked, false)
   h.api.stop()
 })
 
@@ -886,7 +927,7 @@ test('点预设色：文件夹立刻更新，不等下一次轮询；文件夹�
   h.api.stop()
 })
 
-test('自定义 hex 与恢复默认都生效（恢复默认回哈希色）', async () => {
+test('自定义 hex 与恢复默认都生效：恢复默认后文件夹回到 DSH 原生（不留任何插件痕迹）', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
   openHostMenu(h, 'proj-a')
@@ -897,12 +938,122 @@ test('自定义 hex 与恢复默认都生效（恢复默认回哈希色）', asy
   paletteButton(h, '.dsgb-palette-apply').fire('click')
   await h.settle()
   assert.equal(folderInkOf(made.folder), '#00bca6')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1')
 
-  // 恢复默认
+  // 恢复默认：删除覆盖 → 标记与变量一起撤掉，让宿主 CSS 重新生效
   clickColorEntry(h)
   paletteButton(h, '.dsgb-palette-reset').fire('click')
   await h.settle()
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-a'))
+  assert.equal(folderInkOf(made.folder), '', '恢复默认不得写回哈希色或任何固定色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), null)
+  assert.equal(Object.keys(h.api.colors()).length, 0, '配置里也不能留哈希默认色')
+  // Buddy 按既有默认规则显示（哈希默认色）
+  const { slot } = makeRow(h.doc, made.section, 's1', false)
+  h.setState(sessionsBody([phaseRow('s1', 'working')]))
+  await h.tick(600)
+  assert.equal(botBodyFill(slot), defaultInk('proj-a'), 'Buddy 恢复既有默认规则')
+  h.api.stop()
+})
+
+test('未设置颜色时：色块都不标已选、自定义框不预填哈希默认色、打开调色板不写配置', async () => {
+  const h = await boot()
+  makeFolderSection(h.doc, 'proj-a')
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  clickColorEntry(h)
+  const box = h.doc.querySelector('.dsgb-palette')
+  const on = box.querySelectorAll('.dsgb-swatch.is-on')
+  assert.equal(on.length, 0, '未设置时不得把哈希默认色对应的色块标成已选')
+  assert.equal(paletteButton(h, '.dsgb-hex').value, '', '未设置时输入框不预填')
+  assert.equal(paletteButton(h, '.dsgb-palette-reset').textContent, '恢复默认', '按钮文案不再带色值')
+  assert.match(box.textContent, /文件夹跟随 DSH/, '有简短说明表达默认行为')
+  await h.settle()
+  assert.equal(
+    h.fetchLog.filter((entry) => entry.method === 'POST' && entry.url.indexOf('/colors.json') !== -1).length,
+    0,
+    '仅打开调色板不能产生配置写入',
+  )
+  h.api.stop()
+})
+
+test('已设置颜色时：对应色块标已选、自定义框显示当前值', async () => {
+  const h = await boot()
+  makeFolderSection(h.doc, 'proj-a')
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  openHostMenu(h, 'proj-a')
+  await h.tick(2000)
+  clickColorEntry(h)
+  const box = h.doc.querySelector('.dsgb-palette')
+  const on = box.querySelectorAll('.dsgb-swatch.is-on')
+  assert.equal(on.length, 1)
+  assert.equal(on[0].getAttribute('aria-label'), '紫')
+  assert.equal(paletteButton(h, '.dsgb-hex').value, '#9159fe')
+  h.api.stop()
+})
+
+test('提交失败（原生 → 选色）：乐观着色撤销，文件夹回到 DSH 原生，Buddy 回默认规则', async () => {
+  const h = await boot()
+  const made = makeFolderSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, made.section, 's1', false)
+  h.setState(sessionsBody([phaseRow('s1', 'working')]))
+  await h.tick(600)
+  assert.equal(folderInkOf(made.folder), '', '前提：原生状态')
+
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  h.failFetch(true)
+  clickColorEntry(h)
+  paletteButton(h, '[aria-label="青"]').fire('click')
+  await h.settle()
+  assert.equal(folderInkOf(made.folder), '', '保存失败要撤销乐观着色，回到原生')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), null, '插件标记也要撤掉')
+  assert.equal(botBodyFill(slot), defaultInk('proj-a'), 'Buddy 回既有默认规则')
+  assert.ok(h.doc.querySelector('.dsgb-color-error') !== null, '要有可观察的错误提示')
+  h.api.stop()
+})
+
+test('提交失败（自定义色 → 恢复默认）：恢复此前的自定义色，并沿用错误提示', async () => {
+  const h = await boot()
+  const made = makeFolderSection(h.doc, 'proj-a')
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  openHostMenu(h, 'proj-a')
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '#9159fe')
+
+  h.failFetch(true)
+  clickColorEntry(h)
+  paletteButton(h, '.dsgb-palette-reset').fire('click')
+  await h.settle()
+  assert.equal(folderInkOf(made.folder), '#9159fe', '失败后回到此前的自定义色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1', '标记也要回来')
+  assert.ok(h.doc.querySelector('.dsgb-color-error') !== null, '沿用已有错误提示')
+  h.api.stop()
+})
+
+test('恢复默认成功后，迟到的旧轮询响应不能把已删除的覆盖挂回来', async () => {
+  const h = await boot()
+  const made = makeFolderSection(h.doc, 'proj-a')
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '#9159fe')
+
+  // 把"恢复默认"的那次 POST 挂起，同时让配色表 GET 仍返回旧值（模拟旧响应）
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  const release = h.holdNextColorsPost()
+  clickColorEntry(h)
+  paletteButton(h, '.dsgb-palette-reset').fire('click')
+  await h.settle()
+  assert.equal(folderInkOf(made.folder), '', '乐观撤销先落')
+
+  // 旧配色表（还带着 proj-a）在轮询里回来：colorSeq 保护应当丢弃它
+  await h.tick(1600)
+  assert.equal(folderInkOf(made.folder), '', '旧轮询响应不得把覆盖挂回来')
+  release()
+  await h.settle()
+  h.setColors({ ok: true, projects: {} })
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '')
   h.api.stop()
 })
 
@@ -954,22 +1105,62 @@ test('连续改色与旧响应交错：最后点击的颜色获胜', async () =>
   h.api.stop()
 })
 
-test('宿主把项目 A 的行节点复用为 B：data-row-key 一换，色当场跟着换', async () => {
+test('宿主把项目 A 的行节点复用为 B：有自定义色的 A → 未设置的 B，插件痕迹当场撤掉', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
-  await h.tick(600)
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-a'))
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '#9159fe')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1')
+  // B 没有显式配置 → 节点必须回到原生：不得残留 A 的变量与标记
   made.row.setAttribute('data-row-key', 'workspace:proj-b')
   h.api.sync()
   await h.settle()
-  assert.equal(folderInkOf(made.folder), defaultInk('proj-b'), '复用节点不得残留 A 的颜色')
+  assert.equal(folderInkOf(made.folder), '', '复用节点不得残留 A 的颜色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), null, '也不得残留 A 的标记')
+  // 再复用回有显式色的 C：又要着色（记录能重建）
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe', 'proj-c': '#00bca6' } })
+  made.row.setAttribute('data-row-key', 'workspace:proj-c')
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '#00bca6', '复用为有配置的项目时重新着色')
+  h.api.stop()
+})
+
+test('节点卸载后重新挂载：未配置的保持原生，已配置的重新着色', async () => {
+  const h = await boot()
+  const made = makeFolderSection(h.doc, 'proj-a')
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
+  assert.equal(folderInkOf(made.folder), '#9159fe')
+  // 整个分区摘掉再挂回来
+  made.section.remove()
+  h.api.sync()
+  await h.settle()
+  h.doc.body.appendChild(made.section)
+  h.api.sync()
+  await h.settle()
+  assert.equal(folderInkOf(made.folder), '#9159fe', '重新挂载后仍按显式色着色')
+  assert.equal(made.folder.getAttribute(FOLDER_MARK), '1')
+
+  // 未配置的项目卸载重挂：始终不带插件痕迹
+  const plain = makeFolderSection(h.doc, 'proj-plain')
+  await h.tick(600)
+  plain.section.remove()
+  h.api.sync()
+  await h.settle()
+  h.doc.body.appendChild(plain.section)
+  h.api.sync()
+  await h.settle()
+  assert.equal(folderInkOf(plain.folder), '')
+  assert.equal(plain.folder.getAttribute(FOLDER_MARK), null)
   h.api.stop()
 })
 
 test('宿主替换文件夹 SVG（展开/收起换图标）：新图标仍在同一格、色不丢', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
-  await h.tick(600)
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
   const firstInk = folderInkOf(made.folder)
   // 换掉格子里的 SVG（宿主 open/close 切换就是这么干的）
   const svg = made.folder.children[0]
@@ -1001,7 +1192,8 @@ test('宿主替换文件夹 SVG（展开/收起换图标）：新图标仍在同
 test('stop() 把文件夹外观还给宿主：标记与变量都摘掉', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
-  await h.tick(600)
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
   assert.equal(made.folder.getAttribute(FOLDER_MARK), '1')
   h.api.stop()
   assert.equal(made.folder.getAttribute(FOLDER_MARK), null, '标记要摘掉')
@@ -1009,19 +1201,22 @@ test('stop() 把文件夹外观还给宿主：标记与变量都摘掉', async (
   assert.equal(h.api, undefined, '对外 API 也一并撤下')
 })
 
-test('重启（stop 后重新 boot）不重复注入、不残留旧色', async () => {
+test('重启（stop 后重新 boot）不重复注入、不残留旧色；未配置的项目重启后仍是原生', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')
-  await h.tick(600)
+  h.setColors({ ok: true, projects: { 'proj-a': '#9159fe' } })
+  await h.tick(2000)
   h.api.stop()
   // 重新 boot：同页再来一次（widget 的 boot 幂等守卫靠全局对象，这里手动再跑一次产物）
   const boot2 = await boot()
   const made2 = makeFolderSection(boot2.doc, 'proj-a')
+  const plain2 = makeFolderSection(boot2.doc, 'proj-plain')
   await boot2.tick(600)
-  assert.equal(made2.folder.getAttribute(FOLDER_MARK), '1')
-  assert.equal(folderInkOf(made2.folder), defaultInk('proj-a'))
+  assert.equal(made2.folder.getAttribute(FOLDER_MARK), null, '新页面没有配色表时保持原生')
+  assert.equal(folderInkOf(made2.folder), '')
+  assert.equal(plain2.folder.getAttribute(FOLDER_MARK), null)
   const marks = boot2.doc.querySelectorAll('[' + FOLDER_MARK + '="1"]')
-  assert.equal(marks.length, 1, '同一格只有一个标记')
+  assert.equal(marks.length, 0, '没有任何插件标记')
   boot2.api.stop()
 })
 

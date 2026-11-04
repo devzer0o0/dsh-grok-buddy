@@ -259,7 +259,15 @@ function startServer() {
       if (url === '/__test/control' && req.method === 'POST') {
         return readBody(req, (raw) => {
           try {
-            if (JSON.parse(raw).action === 'fail-next-colors') failNextColorsPost = true
+            const control = JSON.parse(raw)
+            if (control.action === 'fail-next-colors') failNextColorsPost = true
+            // 直接改写假配色表（测试里模拟「别的窗口改了 / 删了配置」）
+            if (control.action === 'set-colors' && control.projects !== null && typeof control.projects === 'object') {
+              for (const key of Object.keys(colorProjects)) delete colorProjects[key]
+              for (const [key, value] of Object.entries(control.projects)) {
+                if (/^#[0-9a-f]{6}$/.test(String(value))) colorProjects[key] = String(value)
+              }
+            }
           } catch (err) {}
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ ok: true }))
@@ -456,9 +464,11 @@ async function main() {
       aria,
     )
 
-    // ── 项目文件夹着色（原生文件夹图标 = 项目身份色）────────────────────────
-    // 默认色：不同项目不同哈希色；折叠/空项目、未分组桶同样着色；
-    // folderActive（宿主固定蓝）被项目色压过；箭头/标题/按钮不受影响。
+    // ── 项目文件夹着色（只有显式选过颜色的项目才着色）──────────────────────
+    // 默认（未设置）：文件夹保持 DSH 原生色 —— 普通态是宿主灰、folderActive
+    // 是宿主蓝，且随主题变化。插件标记与颜色变量一个都不许有。
+    // 对照组：同一主题同一状态下、没有插件覆盖的宿主节点（用「停掉插件后的
+    // 值」与「兄弟行的宿主灰」交叉核对）。
     const folderDefault = await evaluate(`(async () => {
       const inkOf = (el) => getComputedStyle(el).color
       const folderOf = (key) => document.querySelector('[data-row-key="workspace:' + key + '"] > .JoiKIa_slot.JoiKIa_folder')
@@ -469,11 +479,16 @@ async function main() {
       const btnA = document.querySelector('[data-row-key="workspace:proj-a"] .JoiKIa_iconButton')
       const svgA = a.querySelector('svg')
       const r = a.getBoundingClientRect()
+      const hostA = inkOf(a)
+      const hostB = inkOf(b)
+      const hostU = inkOf(u)
       return {
         api: folders,
-        inkA: inkOf(a), inkB: inkOf(b), inkU: inkOf(u),
+        inkA: hostA, inkB: hostB, inkU: hostU,
         varA: a.style.getPropertyValue('--dsgb-workspace-ink'),
         markedA: a.getAttribute('data-dsgb-workspace-folder'),
+        // 宿主自己的 class 必须原样保留（folderActive 是选中色的来源）
+        classA: a.getAttribute('class'),
         titleColor: getComputedStyle(titleA).color,
         chevronColor: chevronA === null ? null : getComputedStyle(chevronA).color,
         btnColor: getComputedStyle(btnA).color,
@@ -484,17 +499,19 @@ async function main() {
     })()`)
     const sameInk = (a, b) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '')
     record(
-      '三个项目文件夹各用各的项目色（哈希默认色），变量与标记齐备',
-      folderDefault.markedA === '1' &&
-        folderDefault.varA === folderDefault.api[0].ink &&
-        folderDefault.inkA !== folderDefault.inkB &&
+      '默认（未设置）：三个文件夹都没有插件标记与颜色变量，诊断里 chosen=null',
+      folderDefault.markedA === null &&
+        folderDefault.varA === '' &&
         folderDefault.api.map((f) => f.workspaceId).join(',') === 'proj-a,proj-b,' &&
-        folderDefault.api.every((f) => f.marked === true),
+        folderDefault.api.every((f) => f.marked === false && f.ink === null && f.chosen === null),
       folderDefault,
     )
     record(
-      'folderActive（宿主固定蓝 #1084fe）被项目色压过，不再是宿主蓝',
-      folderDefault.inkA !== 'rgb(16, 132, 254)' && sameInk(folderDefault.inkA, 'rgb(' + hexToRgbParts(folderDefault.varA) + ')'),
+      '默认（未设置）：实际 computed color 就是宿主自己的颜色（普通灰 / folderActive 蓝）',
+      sameInk(folderDefault.inkA, 'rgb(16, 132, 254)') &&
+        sameInk(folderDefault.inkB, 'rgb(138, 143, 152)') &&
+        sameInk(folderDefault.inkU, 'rgb(138, 143, 152)') &&
+        /folderActive/.test(String(folderDefault.classA)),
       folderDefault,
     )
     record(
@@ -514,101 +531,163 @@ async function main() {
       folderDefault,
     )
 
-    // 同背景下：文件夹主轮廓颜色 == 彩色 Buddy 主体颜色
-    const inkAgreement = await evaluate(`(() => {
-      const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
-      const bot = document.querySelector('[data-row-key="session:p-working"] svg.dsgb')
-      const body = bot.querySelector('[data-dsgb-layer="body"] > path')
-      return { folder: getComputedStyle(folder).color, buddy: getComputedStyle(body).fill, buddyAttr: body.getAttribute('fill') }
-    })()`)
-    record(
-      '同背景下文件夹颜色与彩色 Buddy 主体颜色一致（同一墨色来源）',
-      sameInk(inkAgreement.folder, inkAgreement.buddy) && inkAgreement.buddyAttr === folderDefault.varA,
-      inkAgreement,
-    )
-
     // 调色板真实交互：⋯ 菜单 → 颜色 → 预设红 → 文件夹与 Buddy 立即同色
+    /** proj-a 的哈希默认墨色（Buddy 恢复默认后应显示它）。 */
+    const windowDefaultInk = await evaluate(`window.__dshGrokBuddy.defaultInk('proj-a')`)
     const paletteFlow = await evaluate(`(async () => {
-      const row = document.querySelector('[data-row-key="workspace:proj-a"]')
-      row.classList.add('JoiKIa_menuOpen')
-      const menu = document.createElement('div')
-      menu.setAttribute('data-menu-material', '')
-      const wrap = document.createElement('div')
-      for (const label of ['重命名', '删除工作区']) {
-        const b = document.createElement('button')
-        b.setAttribute('role', 'menuitem')
-        b.textContent = label
-        wrap.appendChild(b)
+      const openPalette = async () => {
+        const row = document.querySelector('[data-row-key="workspace:proj-a"]')
+        row.classList.add('JoiKIa_menuOpen')
+        document.querySelector('[data-menu-material]')?.remove()
+        const menu = document.createElement('div')
+        menu.setAttribute('data-menu-material', '')
+        const wrap = document.createElement('div')
+        for (const label of ['重命名', '删除工作区']) {
+          const b = document.createElement('button')
+          b.setAttribute('role', 'menuitem')
+          b.textContent = label
+          wrap.appendChild(b)
+        }
+        menu.appendChild(wrap)
+        document.body.appendChild(menu)
+        for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) {
+          await new Promise((r) => setTimeout(r, 100))
+        }
+        const entry = document.querySelector('.dsgb-menu-item button')
+        if (entry === null) return null
+        entry.click()
+        for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) {
+          await new Promise((r) => setTimeout(r, 50))
+        }
+        return document.querySelector('.dsgb-palette')
       }
-      menu.appendChild(wrap)
-      document.body.appendChild(menu)
-      for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) {
-        await new Promise((r) => setTimeout(r, 100))
-      }
-      const entry = document.querySelector('.dsgb-menu-item button')
-      if (entry === null) return { step: 'menu-item' }
-      entry.click()
-      for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) {
-        await new Promise((r) => setTimeout(r, 50))
-      }
-      const box = document.querySelector('.dsgb-palette')
+      const box = await openPalette()
       if (box === null) return { step: 'palette' }
       const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
       const bot = document.querySelector('[data-row-key="session:p-working"] svg.dsgb')
       const body = bot.querySelector('[data-dsgb-layer="body"] > path')
       const before = getComputedStyle(folder).color
       const beforeBot = getComputedStyle(body).fill
+      // 未设置时：不许把任何色块标成已选、自定义框不预填
+      const presetOn = box.querySelectorAll('.dsgb-swatch.is-on').length
+      const inputValue = box.querySelector('.dsgb-hex').value
+      const resetText = box.querySelector('.dsgb-palette-reset').textContent
+      const hint = (box.querySelector('.dsgb-palette-hint') || {}).textContent || null
       box.querySelector('.dsgb-swatch[aria-label="红"]').click()
       await new Promise((r) => setTimeout(r, 120))
       return {
         step: 'ok',
-        before, beforeBot,
+        before, beforeBot, presetOn, inputValue, resetText, hint,
         after: getComputedStyle(folder).color,
         afterBot: getComputedStyle(body).fill,
         afterVar: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        marked: folder.getAttribute('data-dsgb-workspace-folder'),
         rowB: getComputedStyle(document.querySelector('[data-row-key="workspace:proj-b"] > .JoiKIa_slot.JoiKIa_folder')).color,
         ungroupedVar: document.querySelector('[data-row-key="workspace:"] > .JoiKIa_slot.JoiKIa_folder').style.getPropertyValue('--dsgb-workspace-ink'),
+        api: window.__dshGrokBuddy.folders(),
       }
     })()`)
+    record(
+      '未设置时打开调色板：无声色块被标已选、输入框为空、按钮文案是「恢复默认」+ 说明',
+      paletteFlow.step === 'ok' &&
+        paletteFlow.presetOn === 0 &&
+        paletteFlow.inputValue === '' &&
+        paletteFlow.resetText === '恢复默认' &&
+        /文件夹跟随 DSH/.test(paletteFlow.hint || '') &&
+        sameInk(paletteFlow.before, 'rgb(16, 132, 254)'),
+      paletteFlow,
+    )
     record(
       '点预设红：proj-a 文件夹与 Buddy 立即同变 #ff263c，别的项目不受影响',
       paletteFlow.step === 'ok' &&
         sameInk(paletteFlow.after, 'rgb(255, 38, 60)') &&
         paletteFlow.afterVar === '#ff263c' &&
+        paletteFlow.marked === '1' &&
         sameInk(paletteFlow.afterBot, paletteFlow.after) &&
-        sameInk(paletteFlow.rowB, folderDefault.inkB) &&
-        paletteFlow.ungroupedVar === folderDefault.api[2].ink,
+        sameInk(paletteFlow.rowB, 'rgb(138, 143, 152)') &&
+        paletteFlow.ungroupedVar === '' &&
+        paletteFlow.api.every((f) => f.workspaceId === 'proj-a' || f.marked === false),
       paletteFlow,
     )
 
-    // 恢复默认：回到哈希色
+    // 恢复默认：撤销覆盖 → 文件夹回到 DSH 原生色，并继续响应宿主的选中状态
     const resetFlow = await evaluate(`(async () => {
-      document.querySelector('[data-row-key="workspace:proj-a"]').classList.add('JoiKIa_menuOpen')
-      const menu = document.querySelector('[data-menu-material]')
-      if (menu !== null) menu.remove()
-      const m2 = document.createElement('div')
-      m2.setAttribute('data-menu-material', '')
-      const wrap = document.createElement('div')
-      for (const label of ['重命名', '删除工作区']) {
-        const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.textContent = label; wrap.appendChild(b)
+      const openPalette = async () => {
+        document.querySelector('[data-row-key="workspace:proj-a"]').classList.add('JoiKIa_menuOpen')
+        document.querySelector('[data-menu-material]')?.remove()
+        const m2 = document.createElement('div')
+        m2.setAttribute('data-menu-material', '')
+        const wrap = document.createElement('div')
+        for (const label of ['重命名', '删除工作区']) {
+          const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.textContent = label; wrap.appendChild(b)
+        }
+        m2.appendChild(wrap); document.body.appendChild(m2)
+        for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) await new Promise((r) => setTimeout(r, 100))
+        document.querySelector('.dsgb-menu-item button').click()
+        for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) await new Promise((r) => setTimeout(r, 50))
+        return document.querySelector('.dsgb-palette')
       }
-      m2.appendChild(wrap); document.body.appendChild(m2)
-      for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) await new Promise((r) => setTimeout(r, 100))
-      document.querySelector('.dsgb-menu-item button').click()
-      for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) await new Promise((r) => setTimeout(r, 50))
-      document.querySelector('.dsgb-palette .dsgb-palette-reset').click()
+      const box = await openPalette()
+      if (box === null) return { step: 'palette' }
+      const before = getComputedStyle(document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')).color
+      box.querySelector('.dsgb-palette-reset').click()
       await new Promise((r) => setTimeout(r, 150))
       const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
-      return { ink: getComputedStyle(folder).color, var: folder.style.getPropertyValue('--dsgb-workspace-ink') }
+      const active = getComputedStyle(folder).color
+      // 宿主的选中状态变化：拿掉 folderActive 应该立刻变回普通灰 ——
+      // 证明颜色真的来自宿主规则，而不是插件写死的某个值。
+      folder.classList.remove('JoiKIa_folderActive')
+      const plain = getComputedStyle(folder).color
+      folder.classList.add('JoiKIa_folderActive')
+      const selectedAgain = getComputedStyle(folder).color
+      const bot = document.querySelector('[data-row-key="session:p-working"] svg.dsgb [data-dsgb-layer="body"] > path')
+      return {
+        step: 'ok',
+        before, active, plain, selectedAgain,
+        var: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        marked: folder.getAttribute('data-dsgb-workspace-folder'),
+        buddy: getComputedStyle(bot).fill,
+        api: window.__dshGrokBuddy.folders(),
+        colors: window.__dshGrokBuddy.colors(),
+      }
     })()`)
     record(
-      '恢复默认：文件夹回到该项目哈希色',
-      resetFlow.var === folderDefault.api[0].ink && sameInk(resetFlow.ink, folderDefault.inkA),
+      '恢复默认：文件夹回到 DSH 原生色（folderActive 蓝），标记与变量都撤掉',
+      resetFlow.step === 'ok' &&
+        sameInk(resetFlow.before, 'rgb(255, 38, 60)') &&
+        sameInk(resetFlow.active, 'rgb(16, 132, 254)') &&
+        resetFlow.var === '' &&
+        resetFlow.marked === null &&
+        Object.keys(resetFlow.colors).length === 0 &&
+        resetFlow.api.every((f) => f.chosen === null && f.marked === false),
+      resetFlow,
+    )
+    record(
+      '恢复默认后仍随宿主选中状态变化（不是把某个颜色写死回去）',
+      resetFlow.step === 'ok' &&
+        resetFlow.plain !== resetFlow.active &&
+        sameInk(resetFlow.plain, 'rgb(138, 143, 152)') &&
+        sameInk(resetFlow.selectedAgain, resetFlow.active),
+      resetFlow,
+    )
+    record(
+      '恢复默认后 Buddy 按其既有默认规则显示（哈希默认色）',
+      resetFlow.step === 'ok' && sameInk(resetFlow.buddy, 'rgb(' + hexToRgbParts(windowDefaultInk) + ')'),
       resetFlow,
     )
 
-    // 提交失败：两边一起回滚 + 可观察提示
+    // 提交失败（自定义色 → 恢复默认）：回滚到此前的自定义色 + 可观察提示
     const failFlow = await evaluate(`(async () => {
+      await fetch('/dsh-grok-buddy/colors.json', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'proj-a', color: '#9159fe' }),
+      })
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 100))
+        const el = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
+        if (el.style.getPropertyValue('--dsgb-workspace-ink') === '#9159fe') break
+      }
+      const before = getComputedStyle(document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')).color
       await fetch('/__test/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'fail-next-colors' }) })
       const row = document.querySelector('[data-row-key="workspace:proj-a"]')
       row.classList.add('JoiKIa_menuOpen')
@@ -624,45 +703,112 @@ async function main() {
       for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) await new Promise((r) => setTimeout(r, 50))
       const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
       const body = document.querySelector('[data-row-key="session:p-working"] svg.dsgb [data-dsgb-layer="body"] > path')
-      document.querySelector('.dsgb-palette .dsgb-swatch[aria-label="青"]').click()
+      document.querySelector('.dsgb-palette .dsgb-palette-reset').click()
       await new Promise((r) => setTimeout(r, 150))
       return {
+        before,
         folder: getComputedStyle(folder).color,
         var: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        marked: folder.getAttribute('data-dsgb-workspace-folder'),
         buddy: getComputedStyle(body).fill,
         toast: (document.querySelector('.dsgb-color-error') || {}).textContent || null,
       }
     })()`)
     record(
-      '提交失败：文件夹与 Buddy 一起回滚到已确认颜色，并出现错误提示',
-      failFlow.var === folderDefault.api[0].ink &&
-        sameInk(failFlow.folder, folderDefault.inkA) &&
-        sameInk(failFlow.buddy, folderDefault.inkA) &&
+      '提交失败（自定义色 → 恢复默认）：文件夹回此前的自定义色，Buddy 同回，并出现错误提示',
+      sameInk(failFlow.before, 'rgb(145, 89, 254)') &&
+        failFlow.var === '#9159fe' &&
+        failFlow.marked === '1' &&
+        sameInk(failFlow.folder, 'rgb(145, 89, 254)') &&
+        sameInk(failFlow.buddy, failFlow.folder) &&
         /没保存成功/.test(failFlow.toast || ''),
       failFlow,
     )
+    const resetAgain = await evaluate(`(async () => {
+      document.querySelector('[data-row-key="workspace:proj-a"]').classList.add('JoiKIa_menuOpen')
+      document.querySelector('[data-menu-material]')?.remove()
+      const m = document.createElement('div'); m.setAttribute('data-menu-material', '')
+      const wrap = document.createElement('div')
+      for (const label of ['重命名', '删除工作区']) {
+        const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.textContent = label; wrap.appendChild(b)
+      }
+      m.appendChild(wrap); document.body.appendChild(m)
+      for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) await new Promise((r) => setTimeout(r, 100))
+      document.querySelector('.dsgb-menu-item button').click()
+      for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) await new Promise((r) => setTimeout(r, 50))
+      document.querySelector('.dsgb-palette .dsgb-palette-reset').click()
+      await new Promise((r) => setTimeout(r, 200))
+      const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
+      const body = document.querySelector('[data-row-key="session:p-working"] svg.dsgb [data-dsgb-layer="body"] > path')
+      return {
+        folder: getComputedStyle(folder).color,
+        var: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        buddy: getComputedStyle(body).fill,
+        expectBuddy: 'rgb(0, 188, 166)',
+      }
+    })()`)
+    record(
+      '重试「恢复默认」成功：文件夹回到宿主原生蓝，Buddy 回默认项目色',
+      sameInk(resetAgain.folder, 'rgb(16, 132, 254)') &&
+        resetAgain.var === '' &&
+        sameInk(resetAgain.buddy, resetAgain.expectBuddy),
+      resetAgain,
+    )
 
-    // 行节点复用：data-row-key 换成别的项目，颜色当场跟过去
+    // 行节点复用：宿主把项目 A 的行节点改挂成另一个项目
+    //   有显式色的 A → 未设置的 proj-c：插件痕迹必须当场撤掉，回到宿主原生色。
     const reuse = await evaluate(`(async () => {
+      await fetch('/dsh-grok-buddy/colors.json', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'proj-b', color: '#9159fe' }),
+      })
       const row = document.querySelector('[data-row-key="workspace:proj-b"]')
       const folder = row.querySelector(':scope > .JoiKIa_slot.JoiKIa_folder')
-      const before = folder.style.getPropertyValue('--dsgb-workspace-ink')
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 100))
+        if (folder.style.getPropertyValue('--dsgb-workspace-ink') === '#9159fe') break
+      }
+      const before = {
+        var: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        marked: folder.getAttribute('data-dsgb-workspace-folder'),
+        color: getComputedStyle(folder).color,
+      }
       row.setAttribute('data-row-key', 'workspace:proj-c')
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 100))
-        if (folder.style.getPropertyValue('--dsgb-workspace-ink') !== before) break
+        if (folder.style.getPropertyValue('--dsgb-workspace-ink') === '') break
       }
-      return { before, after: folder.style.getPropertyValue('--dsgb-workspace-ink'), api: window.__dshGrokBuddy.folders() }
+      return {
+        before,
+        afterVar: folder.style.getPropertyValue('--dsgb-workspace-ink'),
+        afterMarked: folder.getAttribute('data-dsgb-workspace-folder'),
+        afterColor: getComputedStyle(folder).color,
+        api: window.__dshGrokBuddy.folders(),
+      }
     })()`)
     record(
-      '行节点复用为别的项目：不残留旧项目颜色',
-      reuse.after !== reuse.before && reuse.after === (reuse.api.find((f) => f.workspaceId === 'proj-c') || {}).ink,
+      '行节点复用：有自定义色的项目 → 未设置的项目，插件痕迹撤掉、回到宿主原生色',
+      reuse.before.var === '#9159fe' &&
+        reuse.before.marked === '1' &&
+        reuse.afterVar === '' &&
+        reuse.afterMarked === null &&
+        sameInk(reuse.afterColor, 'rgb(138, 143, 152)') &&
+        (reuse.api.find((f) => f.workspaceId === 'proj-c') || {}).marked === false,
       reuse,
     )
 
-    // 文件夹 SVG 被宿主替换（展开/收起换图标）：格子还在，色不丢
+    // 文件夹 SVG 被宿主替换（展开/收起换图标）：格子还在，色不丢。
+    // proj-a 刚才恢复成了原生色，这里先显式设回红色再验「色不丢」。
     const swap = await evaluate(`(async () => {
+      await fetch('/dsh-grok-buddy/colors.json', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'proj-a', color: '#ff263c' }),
+      })
       const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 100))
+        if (folder.style.getPropertyValue('--dsgb-workspace-ink') === '#ff263c') break
+      }
       const wasOpen = folder.querySelector('path[opacity]') !== null
       const ink = folder.style.getPropertyValue('--dsgb-workspace-ink')
       folder.innerHTML = wasOpen
@@ -681,8 +827,8 @@ async function main() {
     record(
       '文件夹 SVG 被替换后新图标仍解析到项目色（currentColor 生效）',
       swap.marked === '1' &&
-        swap.inkVar === folderDefault.api[0].ink &&
-        (sameInk(swap.strokeResolves, folderDefault.inkA) || sameInk(swap.fillResolves, folderDefault.inkA)),
+        swap.inkVar === '#ff263c' &&
+        (sameInk(swap.strokeResolves, 'rgb(255, 38, 60)') || sameInk(swap.fillResolves, 'rgb(255, 38, 60)')),
       swap,
     )
 
@@ -690,8 +836,17 @@ async function main() {
     const shotsTaken = []
     if (SHOTS !== null) {
       fs.mkdirSync(SHOTS, { recursive: true })
-      // 截图前摆好能看清「文件夹 ↔ Buddy」关系的配色：proj-a=红（working Buddy 同红）、
-      // 未分组=青，proj-c 用默认。轮询取表后再生效。
+      // 截图前摆好能看清「文件夹 ↔ Buddy」关系的三种状态：
+      //   proj-a = 显式红（working Buddy 同红）
+      //   未分组 = 显式青
+      //   proj-b / proj-c = 未设置 → 保持 DSH 原生色（对照）
+      // 截图前先清掉 proj-b 的显式色（前面的复用检查给它设过紫色）。
+      await evaluate(`(async () => {
+        await fetch('/dsh-grok-buddy/colors.json', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId: 'proj-b', color: null }),
+        })
+      })()`)
       await evaluate(`(async () => {
         await fetch('/dsh-grok-buddy/colors.json', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -702,10 +857,20 @@ async function main() {
           body: JSON.stringify({ workspaceId: '__ungrouped__', color: '#00bca6' }),
         })
         const a = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
+        const u = document.querySelector('[data-row-key="workspace:"] > .JoiKIa_slot.JoiKIa_folder')
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 100))
-          if (a.style.getPropertyValue('--dsgb-workspace-ink') === '#ff263c') break
+          if (
+            a.style.getPropertyValue('--dsgb-workspace-ink') === '#ff263c' &&
+            u.style.getPropertyValue('--dsgb-workspace-ink') === '#00bca6'
+          ) {
+            break
+          }
         }
+        // 截区里只留侧栏本身：把前面交互留下的菜单节点收掉
+        document.querySelectorAll('[data-menu-material]').forEach((el) => el.remove())
+        document.querySelector('.dsgb-palette')?.remove()
+        document.querySelector('.dsgb-color-error')?.remove()
         // 滚动到侧栏顶部，保证项目行都在画面里
         window.scrollTo(0, 0)
       })()`)
@@ -717,17 +882,36 @@ async function main() {
       const darkShot = await cdp.send('Page.captureScreenshot', { format: 'png' })
       fs.writeFileSync(path.join(SHOTS, 'folder-ink-dark.png'), Buffer.from(darkShot.data, 'base64'))
       shotsTaken.push('folder-ink-dark.png')
-      const darkInk = await evaluate(`(() => {
-        const folder = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
+      // 注意：前面的复用检查把 proj-b 那一行的 data-row-key 改成了 proj-c，
+      // 所以这里的「未设置」对照用 proj-c。
+      const themeInk = () => evaluate(`(() => {
+        const folder = (key) => document.querySelector('[data-row-key="workspace:' + key + '"] > .JoiKIa_slot.JoiKIa_folder')
         const body = document.querySelector('[data-row-key="session:p-working"] svg.dsgb [data-dsgb-layer="body"] > path')
+        const a = folder('proj-a'), b = folder('proj-c')
         const expect = (window.__dshGrokBuddy.folders().find((f) => f.workspaceId === 'proj-a') || {}).ink
-        return { folder: getComputedStyle(folder).color, buddy: getComputedStyle(body).fill, bg: getComputedStyle(document.body).backgroundColor, expect }
+        return {
+          folder: getComputedStyle(a).color,
+          buddy: getComputedStyle(body).fill,
+          bg: getComputedStyle(document.body).backgroundColor,
+          expect,
+          // 未设置的项目：computed color 必须仍是宿主自己的颜色
+          nativeB: getComputedStyle(b).color,
+          nativeBVar: b.style.getPropertyValue('--dsgb-workspace-ink'),
+          nativeBMarked: b.getAttribute('data-dsgb-workspace-folder'),
+          hostSlot: getComputedStyle(document.documentElement).getPropertyValue('--slot-fg').trim(),
+        }
       })()`)
+      const darkInk = await themeInk()
       record(
-        '深色主题下文件夹与 Buddy 仍同色（与当前项目墨色一致）',
+        '深色主题下显式色文件夹与 Buddy 仍同色（与当前项目墨色一致）',
         sameInk(darkInk.folder, darkInk.buddy) &&
           darkInk.expect !== undefined &&
           sameInk(darkInk.folder, 'rgb(' + hexToRgbParts(darkInk.expect) + ')'),
+        darkInk,
+      )
+      record(
+        '深色主题下未设置的项目文件夹仍是宿主原生灰（无变量、无标记）',
+        sameInk(darkInk.nativeB, 'rgb(138, 143, 152)') && darkInk.nativeBVar === '' && darkInk.nativeBMarked === null,
         darkInk,
       )
       // 浅色
@@ -738,9 +922,34 @@ async function main() {
       const lightShot = await cdp.send('Page.captureScreenshot', { format: 'png' })
       fs.writeFileSync(path.join(SHOTS, 'folder-ink-light.png'), Buffer.from(lightShot.data, 'base64'))
       shotsTaken.push('folder-ink-light.png')
+      const lightInk = await themeInk()
+      record(
+        '浅色主题下未设置的项目文件夹仍是宿主原生灰；显式色的仍是项目色',
+        sameInk(lightInk.nativeB, 'rgb(138, 143, 152)') &&
+          lightInk.nativeBVar === '' &&
+          lightInk.nativeBMarked === null &&
+          sameInk(lightInk.folder, 'rgb(255, 38, 60)'),
+        lightInk,
+      )
     }
 
-    // 悬停：宿主用箭头顶替文件夹（display 切换），插件规则不破坏这个交换
+    // 悬停：宿主用箭头顶替文件夹（display 切换），插件规则不破坏这个交换。
+    // 这里先把 proj-a 恢复到原生色，顺带核对「原生色下悬停/标题也不受影响」。
+    await evaluate(`(async () => {
+      document.querySelector('[data-row-key="workspace:proj-a"]').classList.add('JoiKIa_menuOpen')
+      document.querySelector('[data-menu-material]')?.remove()
+      const m = document.createElement('div'); m.setAttribute('data-menu-material', '')
+      const wrap = document.createElement('div')
+      for (const label of ['重命名', '删除工作区']) {
+        const b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.textContent = label; wrap.appendChild(b)
+      }
+      m.appendChild(wrap); document.body.appendChild(m)
+      for (let i = 0; i < 60 && document.querySelector('.dsgb-menu-item') === null; i++) await new Promise((r) => setTimeout(r, 100))
+      document.querySelector('.dsgb-menu-item button').click()
+      for (let i = 0; i < 30 && document.querySelector('.dsgb-palette') === null; i++) await new Promise((r) => setTimeout(r, 50))
+      document.querySelector('.dsgb-palette .dsgb-palette-reset').click()
+      await new Promise((r) => setTimeout(r, 200))
+    })()`)
     const hover = await (async () => {
       const row = await evaluate(`(() => {
         const row = document.querySelector('[data-row-key="workspace:proj-a"]')
@@ -768,15 +977,12 @@ async function main() {
       hover,
     )
 
-    // 页面重新加载：配色表重新读回，文件夹仍是改过的颜色
+    // 页面重新加载：配色表重新读回 —— 显式色的项目仍是改过的颜色，
+    // 没有配置条目的项目继续保持 DSH 原生色。
     await evaluate(`(async () => {
-      await fetch('/dsh-grok-buddy/colors.json', {
+      await fetch('/__test/control', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: 'proj-a', color: '#ff263c' }),
-      })
-      await fetch('/dsh-grok-buddy/colors.json', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: '__ungrouped__', color: '#00bca6' }),
+        body: JSON.stringify({ action: 'set-colors', projects: { 'proj-a': '#ff263c', __ungrouped__: '#00bca6' } }),
       })
     })()`)
     await cdp.send('Page.navigate', { url: 'http://127.0.0.1:' + port + '/harness.html' })
@@ -790,9 +996,11 @@ async function main() {
       }
       const a = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
       const u = document.querySelector('[data-row-key="workspace:"] > .JoiKIa_slot.JoiKIa_folder')
+      const b = document.querySelector('[data-row-key="workspace:proj-b"] > .JoiKIa_slot.JoiKIa_folder')
       return {
         a: a === null ? null : { ink: getComputedStyle(a).color, var: a.style.getPropertyValue('--dsgb-workspace-ink') },
         u: u === null ? null : { ink: getComputedStyle(u).color, var: u.style.getPropertyValue('--dsgb-workspace-ink') },
+        b: b === null ? null : { ink: getComputedStyle(b).color, var: b.style.getPropertyValue('--dsgb-workspace-ink'), marked: b.getAttribute('data-dsgb-workspace-folder') },
       }
     })()`)
     record(
@@ -800,9 +1008,17 @@ async function main() {
       reloaded.a !== null && reloaded.a.var === '#ff263c' && sameInk(reloaded.a.ink, 'rgb(255, 38, 60)') && reloaded.u !== null && reloaded.u.var === '#00bca6',
       reloaded,
     )
+    record(
+      '页面重新加载后：没有配置条目的 proj-b 仍是 DSH 原生色',
+      reloaded.b !== null &&
+        reloaded.b.marked === null &&
+        reloaded.b.var === '' &&
+        sameInk(reloaded.b.ink, 'rgb(138, 143, 152)'),
+      reloaded,
+    )
 
-    // stop()：把文件夹外观还给宿主（proj-a 带 folderActive → 还给宿主蓝；
-    // proj-b 无 folderActive → 还给宿主灰；两者都证明插件标记已撤下）
+    // stop()：把文件夹外观还给宿主（proj-a 当时已被「恢复默认」→ 宿主蓝；
+    // proj-b 无 folderActive → 宿主灰；两者都证明插件标记已撤下）
     const stopped = await evaluate(`(() => {
       const a = document.querySelector('[data-row-key="workspace:proj-a"] > .JoiKIa_slot.JoiKIa_folder')
       const b = document.querySelector('[data-row-key="workspace:proj-b"] > .JoiKIa_slot.JoiKIa_folder')
