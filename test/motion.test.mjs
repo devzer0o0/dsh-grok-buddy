@@ -438,8 +438,9 @@ test('C5 thinking 与其余五态互切：三点不越界、不残留、进入�
     )
   }
   assert.ok(mid.dots.alpha > 0.2 && mid.dots.alpha < 1, '进入阶段的淡入由组透明度负责（实测 ' + mid.dots.alpha.toFixed(2) + '）')
-  // 手算进入中点：组透明度与点透明度相乘后，可见度应约为稳态的 0.35–0.45 倍，
-  // 而不是「进入进度叠两次」压出来的 0.12 倍（改之前实测就是这样，进入几乎看不见）。
+  // 手算进入中点：组透明度与点透明度相乘后应约为稳态的 0.6–0.7 倍。
+  // 改之前点透明度还要再乘一次进入进度（进度²），中点只有 0.54 倍；再叠加过渡帧的
+  // 组透明度连乘就更暗。这里守住「进入不被压第二次」这条线。
   const midVisible = mid.dots.alpha * Math.min(...mid.dots.items.map((item) => item.alpha))
   assert.ok(midVisible > 0.2, '进入中点的实际可见度应 >0.2（实测 ' + midVisible.toFixed(2) + '）')
   // 进入结束后组透明度必须回到 1，否则稳态会整体发灰
