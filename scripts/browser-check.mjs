@@ -159,8 +159,11 @@ async function main() {
      * —— 那是 CDP 的瞬态竞态，不是断言失败。这里对**仅此一类**错误做有限重试，
      * 其它异常照旧立刻抛出，避免把真实缺陷重试成"通过"。
      */
-    const evaluate = async (expression) => {
+    const evaluate = async (expression, options) => {
       const transient = (err) => /Execution context was destroyed|Cannot find context with specified id/i.test(String(err && err.message))
+      // 上下文被销毁后重放整个表达式，等于把副作用（切相位、改配色、点按钮）再做一遍。
+      // 只有**幂等只读**的探测允许重试；会改页面状态的表达式默认只执行一次。
+      const idempotent = options !== undefined && options !== null && options.idempotent === true
       for (let attempt = 0; ; attempt++) {
         try {
           const result = await cdp.send('Runtime.evaluate', {
@@ -173,7 +176,7 @@ async function main() {
           }
           return result.result.value
         } catch (err) {
-          if (attempt >= 4 || !transient(err)) throw err
+          if (!idempotent || attempt >= 4 || !transient(err)) throw err
           await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)))
         }
       }

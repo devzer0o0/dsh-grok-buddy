@@ -26,7 +26,7 @@ import { collectSurfaces, collectWorkspaceFolders } from './dom.js'
 import { dshRawStateOf, fallbackPhase, mergePhase } from './dsh-state.js'
 import { COOLDOWN_MS, isActive, inkForRow } from './activity.js'
 import { freshMemory, resolveMotion } from './celebrate.js'
-import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '../decision.js'
+import { CONFIRMED_STOP_SOURCES, DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '../decision.js'
 import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
@@ -444,10 +444,15 @@ function boot() {
      * 身份必须**非空且严格相等**：空串不算「同一轮」，否则旧宿主/旧缓存里
      * 缺字段的快照又能混成「已确认的停止」。
      */
+    // 证据必须齐：确证 + 明确错误原因 + 可信来源 + 非空且相等的当前轮身份。
+    // 只比两个 key 是不够的 —— 「certain 为真但来源是暂定来源 / 缺 cause」的快照
+    // 同样不能冒充「已确认的错误停止」。
     const blockedCertain =
       rawPhase === 'blocked' &&
       entry !== undefined &&
       entry.stopCertain === true &&
+      entry.stopCause === 'error' &&
+      CONFIRMED_STOP_SOURCES.indexOf(entry.stopSource) !== -1 &&
       typeof entry.stopTurnKey === 'string' &&
       entry.stopTurnKey !== '' &&
       typeof entry.turnKey === 'string' &&
@@ -1224,6 +1229,7 @@ function boot() {
         // 任务级错误停止的**证据**（不是状态）：页面靠它核验 blocked 是否可信。
         // 缺字段 = 旧宿主 / 旧缓存，按「没有证据」处理（见 dsh-state.js）。
         stopCertain: item.stopCertain === true,
+        stopCause: typeof item.stopCause === 'string' ? item.stopCause : '',
         stopSource: typeof item.stopSource === 'string' ? item.stopSource : '',
         stopCode: typeof item.stopCode === 'string' ? item.stopCode : '',
         stopTurnKey: typeof item.stopTurnKey === 'string' ? item.stopTurnKey : '',

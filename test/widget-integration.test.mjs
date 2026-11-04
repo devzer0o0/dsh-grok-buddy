@@ -318,6 +318,7 @@ function phaseRow(id, phase, extra) {
   const base = { id, phase, reason: 'test', detail: '', ...(extra === undefined ? {} : extra) }
   if (phase === 'blocked' && base.stopCertain === undefined) {
     base.stopCertain = true
+    base.stopCause = 'error'
     base.stopSource = 'turn/end:error'
     base.stopCode = 'QUOTA'
     base.turnKey = id + '#1'
@@ -1378,6 +1379,24 @@ test('旧宿主只给 blocked 名字、没有停止证据：不冒充已确认�
   assert.equal(figure.bang, false, '也不能留下感叹号图层')
   h.api.stop()
 })
+test('停止证据不完整（缺错误原因 / 暂定来源）：不冒充已确认错误停止', async () => {
+  const rows = [
+    { id: 's1', phase: 'blocked', reason: 'stop:QUOTA', detail: 'QUOTA', stopCertain: true, stopSource: 'turn/end:error', stopTurnKey: 's1#1', turnKey: 's1#1' },
+    { id: 's1', phase: 'blocked', reason: 'stop:QUOTA', detail: 'QUOTA', stopCertain: true, stopCause: 'error', stopSource: 'agent/error', stopTurnKey: 's1#1', turnKey: 's1#1' },
+  ]
+  for (const row of rows) {
+    const h = await boot()
+    const section = makeSection(h.doc, 'proj-a')
+    const { slot } = makeRow(h.doc, section, 's1', false)
+    h.setState(sessionsBody([row]))
+    await h.tick(550)
+    const figure = figuresOf(slot)
+    assert.notEqual(figure.phase, 'blocked', JSON.stringify(row))
+    assert.equal(figure.bang, false)
+    h.api.stop()
+  }
+})
+
 
 test('已确认停止不会被残留的原生 done/ongoing 覆盖', async () => {
   const h = await boot()

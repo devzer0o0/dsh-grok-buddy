@@ -54,6 +54,8 @@ const SESSIONS = [
     detail: 'RATE_LIMIT',
     completionKey: '',
     stopCertain: true,
+    // 证据必须齐：确证来源 + 明确错误原因 + 当前轮身份（三缺一都会被降级）。
+    stopCause: 'error',
     stopSource: 'turn/end:error',
     stopCode: 'RATE_LIMIT',
     turnKey: 'p-blocked#7',

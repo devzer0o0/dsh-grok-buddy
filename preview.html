@@ -125,6 +125,8 @@
     <tr><td>原因不明的中断</td><td>idle（不伪造 blocked 或 done）</td></tr>
     <tr><td>页面 <code>state.json</code> 请求失败 / 非法响应</td><td>保持上一份，不把会话判成 blocked</td></tr>
     <tr><td>已确认停止后真正开始新一轮 / 恢复执行</td><td>按新事实显示，退出 blocked</td></tr>
+    <tr><td>成功 / 取消 / 拒绝终局之后的迟到错误</td><td>保持 done 或 idle（本轮已封账，不复活任务）</td></tr>
+    <tr><td>任务收尾后修改标题、工作目录</td><td>照常更新，不影响停止事实</td></tr>
   </table>
 </div>
 

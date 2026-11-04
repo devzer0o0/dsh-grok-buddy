@@ -88,7 +88,8 @@ export function fallbackPhase(row) {
  * @param {boolean} [input.consumed] 这条完成记录是否已被消费。
  * @param {string} [input.completionKey] 当前完成身份。
  * @param {Element} input.row 会话行（读 DSH 状态点）。
- * @param {boolean} [input.stopCertain] 是否有可信的任务级错误停止证据。
+ * @param {boolean} [input.stopCertain] 是否有可信的任务级错误停止证据
+ *   （调用方按 decide 的同一套证明校验得出：确证来源 + 明确错误原因 + 当前轮身份）。
  * @returns {{phase: string, source: string, dshState: string|null}} 融合结果与来源。
  */
 export function mergePhase(input) {

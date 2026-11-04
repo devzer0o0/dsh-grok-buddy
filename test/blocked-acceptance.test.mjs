@@ -177,11 +177,14 @@ test('拒绝：preStep 的 turn/end:blocked 不是错误停止', () => {
   assert.equal(h.row().stopCertain, false)
 })
 
-test('拒绝：若宿主在 blocked 上附带 error，仍按错误停止处理', () => {
+test('拒绝：宿主在 blocked 上附带 error 也不自封为权威错误终局', () => {
   const h = harness()
   h.event('turn/start', { turn: 1 }, 10)
   h.event('turn/end', { turn: 1, reason: { kind: 'blocked', error: { code: 'E_POLICY' } } }, 20)
-  assert.equal(h.phase(), 'blocked')
+  // preStep 拒绝的终局种类是 'blocked'，不是 'error'。载荷里出现一个 error 对象
+  // 不足以证明「任务因错误停止」—— 不猜测因果，显示 idle。
+  assert.equal(h.phase(), 'idle')
+  assert.equal(h.row().stopCertain, false)
 })
 
 // ── 漏报：真实恢复必须退出 blocked ──────────────────────────────────────
@@ -226,3 +229,203 @@ test('重试：陈旧调度超过有效期后落回 idle', () => {
   h.tick(11 * 60 * 1000)
   assert.equal(h.phase(), 'idle')
 })
+// ── 误报三：终局账本必须覆盖**所有**结束类型，不是只封错误停止 ────────────
+
+test('封账：completed 之后迟到的同轮 error 终局不能把 done 改成 blocked', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 20)
+  assert.equal(h.phase(), 'done')
+  h.event('turn/end', { turn: 1, reason: FAIL }, 21)
+  assert.equal(h.phase(), 'done', '这一轮已经有了成功终局')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('封账：用户取消之后迟到的同轮 error 终局不能把 idle 改成 blocked', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }, 20)
+  h.event('turn/end', { turn: 1, reason: FAIL }, 21)
+  assert.equal(h.phase(), 'idle')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('封账：取消之后迟到的 agent/error + idle 也不能确认停止', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }, 20)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'LATE' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'idle')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('封账：preStep 拒绝之后迟到的 agent/error + idle 也不能确认停止', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'blocked' } }, 20)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'LATE' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'idle')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('封账：completed 之后迟到的同轮流式分片与工具调用都不复活任务', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 20)
+  h.reg.onStream('s1', { turn: 1 })
+  h.event('tool/call', { turn: 1, step: 2, callId: 'ghost', name: 'bash' }, 21)
+  assert.equal(h.phase(), 'done')
+  assert.equal(h.facts().tools.length, 0)
+})
+
+test('因果：无终局的 error+idle 停止被随后的权威取消终局清除', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'BOOT' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked')
+  h.event('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }, 20)
+  assert.equal(h.phase(), 'idle')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('因果：兜底确认不接受已封账轮的 idle', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 20)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'FLUSH' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'done')
+})
+
+// ── 误报四：身份与恢复证据必须先校验，再改执行事实 ──────────────────────
+
+test('身份：缺 turn 的 turn/end 不能凭空绑定当前任务', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { reason: FAIL }, 20)
+  assert.notEqual(h.phase(), 'blocked')
+  assert.equal(h.row().stopCertain, false)
+})
+
+test('身份：旧轮错误不能给已静默的当前任务续命', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 2 }, 20)
+  h.tick(3 * 60 * 1000 + 1)
+  assert.equal(h.phase(), 'idle')
+  h.agent('error', { turn: 1, step: 1, error: { code: 'OLD' } })
+  assert.equal(h.phase(), 'idle', '旧轮错误不是当前任务的执行证据')
+})
+
+test('身份：无 turn 的诊断错误不能给已静默的当前任务续命', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.tick(3 * 60 * 1000 + 1)
+  assert.equal(h.phase(), 'idle')
+  h.agent('error', { error: { code: 'DIAGNOSTIC' } })
+  assert.equal(h.phase(), 'idle')
+})
+
+test('身份：没有调用标识的 tool/call 不构成真实恢复', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'BOOT' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked')
+  h.event('tool/call', { turn: 1, step: 2 }, 11)
+  assert.equal(h.phase(), 'blocked', '缺 callId 的调用不是执行证据')
+})
+
+test('身份：没有 turn 的 step/start 不能替代已确认的停止', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.agent('error', { turn: 1, step: 1, error: { code: 'BOOT' } })
+  h.agent('status', { status: 'idle' })
+  assert.equal(h.phase(), 'blocked')
+  h.event('step/start', { step: 2 }, 11)
+  assert.equal(h.phase(), 'blocked', '无法证明属于当前轮的「新一步」不能复活任务')
+})
+
+test('状态：未知状态词必须完全忽略，不能改运行标志', () => {
+  const h = harness()
+  h.agent('status', { status: 'running' })
+  assert.equal(h.facts().agentRunning, true)
+  h.agent('status', { status: 'unknown' })
+  assert.equal(h.facts().agentRunning, true)
+})
+
+// ── 误报五：停止事实不能随时间消失，元数据不能被困死 ────────────────────
+
+test('寿命：已确认的错误停止不受普通缓存 TTL 回收', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: FAIL }, 20)
+  assert.equal(h.phase(), 'blocked')
+  h.tick(60 * 60 * 1000 + 1)
+  assert.equal(h.phase(), 'blocked', '还没被恢复/替代的停止事实不能被忘掉')
+  assert.equal(h.row().stopCertain, true)
+})
+
+test('元数据：任务收尾后标题与工作目录仍可更新', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('turn/end', { turn: 1, reason: FAIL }, 20)
+  h.event('session/title', { title: 'renamed' }, 21)
+  h.event('working-directory/change', { cwd: '/new/project' }, 22)
+  assert.equal(h.reg.peek('s1').title, 'renamed')
+  assert.equal(h.reg.peek('s1').cwd, '/new/project')
+  assert.equal(h.phase(), 'blocked', '元数据变化不影响停止事实')
+})
+
+// ── 误报六：提问投影按任务隔离 ──────────────────────────────────────────
+
+test('投影：被门闸拒绝的旧轮终局不能清掉当前任务的提问', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 2 }, 30)
+  h.reg.onPendingQuestion('s1', { callId: 'q-now' })
+  assert.equal(h.phase(), 'waiting')
+  h.event('turn/end', { turn: 1, reason: FAIL }, 20)
+  assert.equal(h.phase(), 'waiting', '旧轮终局被丢弃，投影也要留着')
+})
+
+test('投影：真正开始新任务时旧提问投影必须失效', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.reg.onPendingQuestion('s1', { callId: 'q-old' })
+  assert.equal(h.phase(), 'waiting')
+  h.event('turn/start', { turn: 2 }, 30)
+  assert.equal(h.phase(), 'thinking', '旧任务的提问不属于新任务')
+})
+
+test('投影：明确为空只清投影来源，事件来源照旧', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('approval/asked', { turn: 1, id: 'a1', toolName: 'write' }, 11)
+  h.reg.onPendingQuestion('s1', { callId: 'q-1' })
+  assert.equal(h.phase(), 'waiting')
+  h.reg.onPendingQuestion('s1', null)
+  assert.equal(h.phase(), 'waiting', '审批还在等，投影清空不能连带清掉它')
+})
+
+// ── 误报七：重试有效性与判定同源 ────────────────────────────────────────
+
+test('重试：未到调度时刻的长退避仍然是 thinking', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('llm/retry', { turn: 1, step: 1, retryId: 'r1', retry: 1, delayMs: 20 * 60 * 1000, failure: { code: 'TRANSPORT' } }, 11)
+  h.tick(11 * 60 * 1000)
+  assert.equal(h.phase(), 'thinking', '宿主说要等 20 分钟，就不能在第 10 分钟宣布失效')
+})
+
+test('重试：快照的 retrying 与判定一致（不出现 idle + retrying）', () => {
+  const h = harness()
+  h.event('turn/start', { turn: 1 }, 10)
+  h.event('llm/retry', { turn: 1, step: 1, retryId: 'r1', retry: 1, delayMs: 1000, failure: { code: 'TRANSPORT' } }, 11)
+  h.tick(11 * 60 * 1000)
+  const row = h.row()
+  assert.equal(row.phase, 'idle')
+  assert.equal(row.retrying, false, 'phase 与 retrying 不能说两套')
+})
+

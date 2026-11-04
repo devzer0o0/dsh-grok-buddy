@@ -106,7 +106,7 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 * **工具失败只是诊断**：一个工具报错、别的工具还在跑、Agent 继续分析、编译/测试失败后
   继续修复，都是 working / thinking，绝不闪 blocked。
 * **自动重试不是停止**：进入退避、连续重试、重试开跑，全程 thinking；只有重试耗尽
-  **并且**宿主用权威终态（`turn/end` reason=error/blocked）终结这一轮，才 blocked。
+  **并且**宿主用权威终态（`turn/end` reason=error）终结这一轮，才 blocked。
 * **已确认的停止压过挂起交互**：执行器已经停下时，残留的审批/提问没有回答方；
   但**未确认**的停止绝不抢走 waiting。
 * **用户取消不是错误停止**：`turn/end` reason=aborted 且 cause 是 user → idle。
@@ -475,10 +475,16 @@ GET 返回 200 但 probe 为 null **不算**链路通 —— 那表示没开窗�
 | 来源 | 真实事实 | 为什么可信 |
 | --- | --- | --- |
 | `turn/end` reason.error | `TurnEndReasonMap.error = { kind:'error'; error: LlmFailure }` | 执行器把这一轮**记录为**错误终态：会话日志里它就是这一轮的结局 |
-| `agent/error` + `agent/status=idle` | 执行器停稳，且这一轮没有留下 `turn/end` | 覆盖「启动阶段致命失败」：真实链条是 turn/start → throwError(agent/error) → finally 里 turn/end 写入失败 → 走到这里 |
+| `agent/error` + `agent/status=idle` | 执行器停稳，这一轮**还开着**且**没留下任何 `turn/end`** | 覆盖「启动阶段致命失败」：真实链条是 turn/start → throwError(agent/error) → finally 里 turn/end 写入失败 → 走到这里 |
 
-这两条都要求 `agent/error` 自带执行身份（`turn`）：宿主 `throwError` 发的载荷总是
-`{ turn, step, error }`，缺 turn 的错误只能是别的插件/观察链路的诊断，绑定不到当前任务。
+两项都要求执行身份非空且与当前轮**严格相等**：`turn/end` 必须带 `turn`；`agent/error`
+必须带 `turn`（宿主 `throwError` 的载荷总是 `{ turn, step, error }`）。缺 turn 的错误只能
+是别的插件/观察链路的诊断，绑定不到当前任务，也不能等 idle 把它升级成本轮的 blocked。
+
+⚠️ **已知因果限制**：宿主的 `turn()` 在 `finally` 里写 `turn/end`，该 append 失败时同样会
+调用 `throwError`。所以「agent/error + idle 且没有 `turn/end`」既可能是错误执行失败，
+也可能是**完成 / 取消 / 拒绝**之后仅终局日志写入失败。插件侧只有这些信号时无法区分；
+在宿主暴露原始停止原因之前，这条兜底路径不能被当成「已覆盖全部致命失败」。
 
 明确**不算**错误停止的两种终局：
 
@@ -493,9 +499,14 @@ flush 失败），所以它只写「暂定停止」，等上面的生命周期�
 `llm/retry` / `llm/retry-started` 不是停止证据：它们证明**自动恢复仍在进行**，任务保持
 thinking。
 
-页面不再「看见 blocked 就画出感叹号」：快照里带 `stopCertain / stopSource / stopCode /
-stopTurnKey`，没有这些证据的（旧宿主、旧缓存、旧 `error`/`retry` 相位名）会降级为 idle
-并保留诊断原因。
+页面不再「看见 blocked 就画出感叹号」：快照里带 `stopCertain / stopCause / stopSource /
+stopCode / stopTurnKey`。校验只有一处实现（`src/decision.js` 的 `stopProofOf()`，宿主与
+页面共用）：确证来源、明确 `cause=error`、身份非空且等于当前轮、且不被成功/非错误终态
+取代 —— 缺任何一条都降级为 idle 并保留诊断原因。
+
+**封账规则**：任何终局（成功 / 错误 / 取消 / 拒绝）落定后，这一轮不再接受任何同轮事件
+（迟到终局、错误、流分片、工具调用都不行），唯一出口是下一轮 `turn/start`。停止事实也
+不会随普通缓存 TTL 被回收 —— 它只能被真实恢复、新任务或权威会话删除替代。
 * 暴露 GET/POST /dsh-grok-buddy/colors.json、probe.json、probe-control.json
 
 注入走两条路：webserver/index-inject 结构化注入行（桌面版唯一受支持的方式），
