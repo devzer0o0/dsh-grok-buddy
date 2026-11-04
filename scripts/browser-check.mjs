@@ -257,6 +257,56 @@ async function main() {
     )
     record('16px 下轨道仍在画布内（不会被裁掉）', layout.orbitExtent <= 315, layout)
 
+    // 2b) thinking 三点在**真实 16px SVG** 里的 CSS px 几何：看圆点自己的矩形，
+    // 不把 viewBox 坐标当像素。跨一个完整脉动周期采样，量最小点径、最大点径、
+    // 整体宽度与相邻边缘缝。
+    const dotCheck = await evaluate(`(async () => {
+      window.__preview.selectPhase('thinking')
+      await new Promise((r) => setTimeout(r, 450))
+      const rec = window.__preview.live.find((x) => x.size === 16)
+      const svg = rec.inst.svg
+      const sample = () => {
+        const boxes = rec.inst.dotEls.map((el) => {
+          const b = el.getBoundingClientRect()
+          return { x: b.x, w: b.width, h: b.height, left: b.left, right: b.right, opacity: Number(getComputedStyle(el).opacity) }
+        })
+        boxes.sort((a, b) => a.left - b.left)
+        const canvas = svg.getBoundingClientRect()
+        return {
+          dpr: window.devicePixelRatio,
+          canvas: { w: canvas.width, h: canvas.height, left: canvas.left, right: canvas.right },
+          diameters: boxes.map((b) => b.w),
+          width: boxes[2].right - boxes[0].left,
+          gap: Math.min(boxes[1].left - boxes[0].right, boxes[2].left - boxes[1].right),
+          inside: boxes.every((b) => b.left >= canvas.left - 0.51 && b.right <= canvas.right + 0.51),
+          alphas: boxes.map((b) => b.opacity),
+        }
+      }
+      const rows = []
+      for (let i = 0; i < 24; i++) {
+        rows.push(sample())
+        await new Promise((r) => setTimeout(r, 90))
+      }
+      return {
+        samples: rows.length,
+        dpr: rows[0].dpr,
+        canvas: rows[0].canvas,
+        minDiameter: Math.min(...rows.flatMap((r) => r.diameters)),
+        maxDiameter: Math.max(...rows.flatMap((r) => r.diameters)),
+        maxWidth: Math.max(...rows.map((r) => r.width)),
+        minGap: Math.min(...rows.map((r) => r.gap)),
+        minAlpha: Math.min(...rows.flatMap((r) => r.alphas)),
+        allInside: rows.every((r) => r.inside),
+        titleShift: 0,
+      }
+    })()`)
+    record(
+      '16px 下三点直径 ≥2.9 CSS px、整体宽 ≤13、边缘缝 ≥1（真实矩形）',
+      dotCheck.minDiameter >= 2.9 && dotCheck.maxDiameter <= 3.7 && dotCheck.maxWidth <= 13 && dotCheck.minGap >= 1 && dotCheck.allInside,
+      dotCheck,
+    )
+    record('16px 下三点的真实透明度下限 ≥0.7（稳态不会糊掉）', dotCheck.minAlpha >= 0.7, dotCheck)
+
     // 3) 真实帧推进：同态不重播，动画确实在前移
     const animation = await evaluate(`(async () => {
       window.__preview.selectPhase('done')

@@ -254,25 +254,33 @@ test('B3 thinking 三点有相位差，不同步闪烁', () => {
   const alphas = frame.dots.items.map((item) => item.alpha)
   const spread = Math.max(...alphas) - Math.min(...alphas)
   assert.ok(spread > 0.2, '同一时刻三颗点的亮度必须不同（相位差），实测 ' + spread.toFixed(2))
-  // 逐个采样：每颗点各自的峰值时刻不同
-  const peakAt = [0, 1, 2].map((i) => {
-    let best = -1
-    let bestT = 0
-    for (let t = 0; t < MOTION_SPEC.triDot.periodMs; t += 5) {
-      const f = sampleFrame('tri-dot', t)
-      const value = f.dots.items[i].alpha
-      if (value > best) {
-        best = value
+  // 逐个采样：每颗点各自的峰值时刻不同。
+  // 峰值要按**周期内相位**比较 —— 三颗点错开 1/3 周期，其中一颗的峰值正好落在
+  // 窗口边缘时，直接取时间差会得到 2/3 周期（旧写法就是这样，曾经绿灯）。
+  const period = MOTION_SPEC.triDot.periodMs
+  const peaks = [0, 1, 2].map((i) => {
+    // 从 t=0 起扫两个周期：进入段（前 320ms）会把点缩略，若从那之后起扫，
+    // 其中一颗点的峰值会落在窗口外而被算成 2/3 周期。
+    // 相位取「第一个」峰值帧而不是最大值帧：透明度在峰值附近是平的，浮点抖动
+    // 会把最大值挪到相邻帧。
+    let bestT = -1
+    for (let t = 0; t < period * 2; t += 5) {
+      const value = sampleFrame('tri-dot', t).dots.items[i].alpha
+      if (value > 0.999) {
         bestT = t
+        break
       }
     }
-    return bestT
+    assert.ok(bestT >= 0, '点 ' + i + ' 一个周期内必须出现亮度峰值')
+    return ((bestT % period) + period) % period
   })
-  assert.ok(new Set(peakAt).size === 3, '三颗点的峰值时刻必须互不相同')
-  const gap = Math.abs(peakAt[1] - peakAt[0])
-  const period = MOTION_SPEC.triDot.periodMs
-  const expected = period / 3
-  assert.ok(Math.abs(gap - expected) < period * 0.2, '相位差应约为 1/3 周期（实测 ' + gap + 'ms）')
+  assert.ok(new Set(peaks.map((v) => Math.round(v))).size === 3, '三颗点的峰值相位必须互不相同')
+  const sorted = [...peaks].sort((a, b) => a - b)
+  for (let i = 0; i < 3; i++) {
+    const next = i === 2 ? sorted[0] + period : sorted[i + 1]
+    const gap = next - sorted[i]
+    assert.ok(Math.abs(gap - period / 3) < period * 0.08, '相位差应约为 1/3 周期（实测 ' + gap.toFixed(0) + 'ms）')
+  }
 })
 
 test('B4 thinking 的循环周期稳定，且点径随亮度一起变', () => {
@@ -396,6 +404,48 @@ test('C4 done → thinking 与 thinking → done 都能过渡（不是只测固�
   }
 })
 
+test('C5 thinking 与其余五态互切：三点不越界、不残留、进入不被重复压暗', () => {
+  const spec = MOTION_SPEC.triDot
+  const canvas = toPx(210 * 1.5)
+  const others = ['rest', 'spin', 'half-lidded', 'bang', 'orbit']
+  for (const other of others) {
+    for (const k of [0, 0.15, 0.35, 0.5, 0.7, 0.9, 1]) {
+      const fromDots = blendFrames(sampleFrame('tri-dot', 900), sampleFrame(other, 400), k)
+      const toDots = blendFrames(sampleFrame(other, 400), sampleFrame('tri-dot', 900), k)
+      const cases = [['thinking→' + other, fromDots, false], [other + '→thinking', toDots, true]]
+      for (const [label, frame, dotsAreTarget] of cases) {
+        if (frame.dots.items.length === 0) continue
+        const g = dotGeometry(frame)
+        assert.ok(g.left >= -0.01 && g.right <= canvas + 0.01, label + ' k=' + k + ' 三点水平越界（' + g.left.toFixed(2) + '..' + g.right.toFixed(2) + '）')
+        assert.ok(g.top >= -0.01 && g.bottom <= canvas + 0.01, label + ' k=' + k + ' 三点垂直越界（' + g.top.toFixed(2) + '..' + g.bottom.toFixed(2) + '）')
+        if (k === 1) {
+          assert.equal(
+            frame.dots.visible,
+            dotsAreTarget,
+            dotsAreTarget ? label + ' 到达 thinking 后三点必须显示' : label + ' 离开 thinking 后三点必须完全退出（不残留）',
+          )
+        }
+      }
+    }
+  }
+  // 进入阶段：三点的淡入只压一次透明度。旧实现 r 乘 grow、alpha 又乘 grow，
+  // 进入中点比稳态暗一大截；现在中点应接近稳态时间盒的 alphaMin..alphaMax。
+  const mid = sampleFrame('tri-dot', spec.enterMs * 0.5)
+  for (const item of mid.dots.items) {
+    assert.ok(
+      item.alpha >= spec.alphaMin - 0.001 && item.alpha <= spec.alphaMax + 0.001,
+      '进入中的点自身透明度应取脉动区间，实测 ' + item.alpha.toFixed(2) + '（不能再乘一次进入进度）',
+    )
+  }
+  assert.ok(mid.dots.alpha > 0.2 && mid.dots.alpha < 1, '进入阶段的淡入由组透明度负责（实测 ' + mid.dots.alpha.toFixed(2) + '）')
+  // 手算进入中点：组透明度与点透明度相乘后，可见度应约为稳态的 0.35–0.45 倍，
+  // 而不是「进入进度叠两次」压出来的 0.12 倍（改之前实测就是这样，进入几乎看不见）。
+  const midVisible = mid.dots.alpha * Math.min(...mid.dots.items.map((item) => item.alpha))
+  assert.ok(midVisible > 0.2, '进入中点的实际可见度应 >0.2（实测 ' + midVisible.toFixed(2) + '）')
+  // 进入结束后组透明度必须回到 1，否则稳态会整体发灰
+  assert.equal(sampleFrame('tri-dot', spec.enterMs + 1).dots.alpha, 1, '进入结束后组透明度必须为 1')
+})
+
 // ── D. 静态 / reduced-motion ───────────────────────────────────────────────
 
 test('D0 静态帧里眼睛是睁开的（不能画成闭眼的薄片）', () => {
@@ -464,7 +514,9 @@ test('E2 16px 下每个图形仍有足够像素（不是糊成一点）', () => 
   const dotPx = MOTION_SPEC.triDot.diamond * D * pxPerUnit
   const bangBarPx = MOTION_SPEC.bang.barTopWidth * D * pxPerUnit
   const orbitPx = MOTION_SPEC.orbit.width * D * pxPerUnit
-  assert.ok(dotPx >= 1.5, '16px 下思考点直径应 ≥1.5px，实测 ' + dotPx.toFixed(2))
+  // 旧门槛 1.5px 就是「点还在，但侧栏里看不出是三颗」的现状。思考点的验收
+  // 改成小尺寸可读性目标：稳态单点 ≥2.9 CSS px（见 E6 的完整几何检查）。
+  assert.ok(dotPx >= 2.9, '16px 下思考点直径应 ≥2.9px（侧栏可辨识），实测 ' + dotPx.toFixed(2))
   assert.ok(bangBarPx >= 1.5, '16px 下感叹号竖条宽度应 ≥1.5px，实测 ' + bangBarPx.toFixed(2))
   assert.ok(orbitPx >= 0.7, '16px 下轨道线宽应 ≥0.7px，实测 ' + orbitPx.toFixed(2))
 })
@@ -486,6 +538,148 @@ test('E5 拖尾紧贴身体边缘掠过（不是飘在远处的一根线）', ()
     frame.trail.radius > bodyRadius * 0.95 && frame.trail.radius < bodyRadius * 1.3,
     '拖尾半径应略大于身体半径（' + (frame.trail.radius / bodyRadius).toFixed(2) + '×）',
   )
+})
+
+// ── F. thinking 三点的小尺寸可读性 ────────────────────────────────────────
+
+/** 16px 图标下 1 身体单位 = 多少 CSS px（viewBox 315 映射到 16px）。 */
+const PX_PER_UNIT = 16 / (210 * 1.5)
+const toPx = (units) => units * PX_PER_UNIT
+/** 画布 315 身体单位，身体中心在正中；INSET 把身体坐标搬到画布坐标。 */
+const VIEWBOX_UNITS = 210 * 1.5
+const CANVAS_INSET = VIEWBOX_UNITS / 2 - BOT_CENTER
+const canvasPx = (bodyUnits) => toPx(bodyUnits + CANVAS_INSET)
+
+/**
+ * 量一帧三点的几何：单点直径、整体宽度、相邻边缘缝，全部换算成 16px 下的 CSS px。
+ * @param {object} frame 采样帧。
+ * @returns {object} 以 CSS px 计的几何。
+ */
+function dotGeometry(frame) {
+  const items = [...frame.dots.items].sort((a, b) => a.x - b.x)
+  const diameters = items.map((item) => toPx(item.r * 2))
+  const left = Math.min(...items.map((item) => item.x - item.r))
+  const right = Math.max(...items.map((item) => item.x + item.r))
+  let minGap = Infinity
+  for (let i = 1; i < items.length; i++) {
+    minGap = Math.min(minGap, toPx((items[i].x - items[i].r) - (items[i - 1].x + items[i - 1].r)))
+  }
+  return {
+    diameters,
+    minDiameter: Math.min(...diameters),
+    maxDiameter: Math.max(...diameters),
+    width: toPx(right - left),
+    minGap,
+    left: canvasPx(left),
+    right: canvasPx(right),
+    top: canvasPx(Math.min(...items.map((item) => item.y - item.r))),
+    bottom: canvasPx(Math.max(...items.map((item) => item.y + item.r))),
+    alphas: items.map((item) => item.alpha),
+  }
+}
+
+test('F1 thinking 稳态一个完整脉动周期：三点清楚、分离、不越界', () => {
+  const spec = MOTION_SPEC.triDot
+  const canvas = toPx(210 * 1.5)
+  const halfCanvas = canvas / 2
+  const centrePx = canvasPx(BOT_CENTER)
+  void centrePx
+  let tightest = Infinity
+  let thinnest = Infinity
+  let widest = 0
+  let fattest = 0
+  let dimmest = 1
+  for (let t = spec.enterMs; t <= spec.enterMs + spec.periodMs; t += 10) {
+    const g = dotGeometry(sampleFrame('tri-dot', t))
+    tightest = Math.min(tightest, g.minGap)
+    thinnest = Math.min(thinnest, g.minDiameter)
+    widest = Math.max(widest, g.width)
+    fattest = Math.max(fattest, g.maxDiameter)
+    dimmest = Math.min(dimmest, Math.min(...g.alphas))
+    // 三颗点必须全部落在 16px 画布里（含描边外沿，这里按半径算）
+    assert.ok(g.left >= 0 && g.right <= canvas, 't=' + t + ' 三点水平越界：' + g.left.toFixed(2) + '..' + g.right.toFixed(2))
+    assert.ok(g.top >= 0 && g.bottom <= canvas, 't=' + t + ' 三点垂直越界：' + g.top.toFixed(2) + '..' + g.bottom.toFixed(2))
+    assert.ok(Math.abs((g.left + g.right) / 2 - canvasPx(BOT_CENTER)) < 0.35, 't=' + t + ' 三点应保持居中（漂移只上下）')
+  }
+  assert.ok(thinnest >= 2.9, '稳态单点直径应 ≥2.9 CSS px，实测最小 ' + thinnest.toFixed(2))
+  assert.ok(fattest <= 3.7, '脉动峰值不要让点胀到糊在一起，实测最大 ' + fattest.toFixed(2))
+  assert.ok(widest >= 12.0 && widest <= 13.0, '三点整体宽度应约 12.5 CSS px，实测 ' + widest.toFixed(2))
+  assert.ok(tightest >= 1.0, '相邻两点的边缘缝应 ≥1 CSS px（不粘连），实测最小 ' + tightest.toFixed(2))
+  assert.ok(dimmest >= 0.7, '稳态最暗的点也要 ≥0.7 透明度（否则小尺寸下会消失），实测 ' + dimmest.toFixed(2))
+  assert.ok(widest < halfCanvas * 2, '三点整体不能撑出画布')
+})
+
+test('F2 thinking 的脉动连续、峰值依次错开、点径与亮度同步', () => {
+  const spec = MOTION_SPEC.triDot
+  const cycle = [];
+  for (let t = spec.enterMs; t <= spec.enterMs + spec.periodMs; t += 10) cycle.push(sampleFrame('tri-dot', t))
+  // 连续性：按「每毫秒的变化率」卡上限，而不是拿 10ms 的累计量当增量。
+  // 正弦包络从谷到峰是 0.2×直径，跨半个周期 700ms，最陡处约 0.0045 CSS px/ms，
+  // 门槛留一倍余量。
+  const perMs = 0.01
+  for (let i = 1; i < cycle.length; i++) {
+    const dt = cycle[i].time - cycle[i - 1].time
+    for (let dot = 0; dot < 3; dot++) {
+      const delta = Math.abs(toPx(cycle[i].dots.items[dot].r - cycle[i - 1].dots.items[dot].r) * 2) / dt
+      assert.ok(delta < perMs, '点径变化率 ' + delta.toFixed(4) + ' CSS px/ms 过大（不是正弦包络）')
+    }
+  }
+  // 峰值时刻：每颗点自己最大的一帧，彼此应差约 1/3 周期
+  const peakAt = [0, 1, 2].map((dot) => {
+    let best = -1
+    let at = 0
+    for (const frame of cycle) {
+      const value = frame.dots.items[dot].r
+      if (value > best) {
+        best = value
+        at = frame.time
+      }
+    }
+    return at
+  })
+  assert.equal(new Set(peakAt).size, 3, '三颗点的点径峰值必须错开')
+  // 按周期内的相位排序比较：采样窗口从 enterMs 起，某颗点的峰值可能落在窗口之外。
+  const phases = peakAt.map((t) => (((t - spec.enterMs) % spec.periodMs) + spec.periodMs) % spec.periodMs).sort((x, y) => x - y)
+  for (let i = 0; i < 3; i++) {
+    const next = i === 2 ? phases[0] + spec.periodMs : phases[i + 1]
+    const gap = next - phases[i]
+    assert.ok(Math.abs(gap - spec.periodMs / 3) < spec.periodMs * 0.08, '点径峰值相位差应约 1/3 周期，实测 ' + gap.toFixed(0) + 'ms')
+  }
+  // 同一个点上「最大的一帧也最亮」：点径与亮度同步，不是各动各的
+  for (let dot = 0; dot < 3; dot++) {
+    let big = cycle[0];
+    let bright = cycle[0]
+    for (const frame of cycle) {
+      if (frame.dots.items[dot].r > big.dots.items[dot].r) big = frame
+      if (frame.dots.items[dot].alpha > bright.dots.items[dot].alpha) bright = frame
+    }
+    assert.equal(big.time, bright.time, '点 ' + dot + ' 的点径峰值与亮度峰值必须同一帧')
+  }
+})
+
+test('F3 reduced-motion 的静态三点沿用调整后的点径与间距', () => {
+  const spec = MOTION_SPEC.triDot
+  const stat = staticFrame('tri-dot')
+  const dyn = sampleFrame('tri-dot', spec.enterMs + spec.periodMs * 0.25)
+  assert.equal(stat.dots.visible, true)
+  assert.equal(stat.dots.alpha, 1, '静态姿态不该残留淡入透明度')
+  const s = dotGeometry(stat)
+  const d = dotGeometry(dyn)
+  // 静态几何必须落在**整个脉动包络**内（而不是碰巧取到某一帧）：
+  // 放大后既不会顶出画布，也不会偷偷缩回旧的小尺寸。
+  const specMinPx = toPx(spec.diamond * D * spec.scaleMin)
+  const specMaxPx = toPx(spec.diamond * D * spec.scaleMax)
+  assert.ok(s.minDiameter >= specMinPx - 0.01, '静态最小点径 ' + s.minDiameter.toFixed(2) + ' 小于脉动谷值 ' + specMinPx.toFixed(2))
+  assert.ok(s.maxDiameter <= specMaxPx + 0.01, '静态最大点径 ' + s.maxDiameter.toFixed(2) + ' 大于脉动峰值 ' + specMaxPx.toFixed(2))
+  assert.ok(s.maxDiameter > s.minDiameter, '静态中间那颗应更大，保留脉动的层次')
+  void d
+  assert.ok(s.minGap >= 1.0, '静态三点边缘缝应 ≥1 CSS px，实测 ' + s.minGap.toFixed(2))
+  assert.ok(s.width >= 12.0 && s.width <= 13.0, '静态三点整体宽度应约 12.5 CSS px，实测 ' + s.width.toFixed(2))
+  for (const alpha of s.alphas) {
+    assert.ok(alpha >= spec.alphaMin - 0.001 && alpha <= spec.alphaMax + 0.001, '静态透明度应取自动态区间，实测 ' + alpha)
+  }
+  // 静态帧不随时间变化，也不带任何进入残留
+  assert.deepEqual(staticFrame('tri-dot'), stat, '静态帧必须稳定')
 })
 
 test('E4 拖尾按颜色切成多段（参考里是并排的彩色带）', () => {

@@ -30,7 +30,7 @@ import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '.
 import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04-folder-ink'
+const BUILD = '2026-11-04-tri-dot-scale'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
