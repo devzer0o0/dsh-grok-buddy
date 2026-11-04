@@ -1,55 +1,58 @@
-<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
-:root{--fg:#1f2328;--bg:#eff1f3;--page:#dfe3e7;--muted:#8a9099}
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>项目色与调色板</title><style>
+:root{--fg:#1f2328;--bg:#eff1f3;--page:#dfe3e7;--muted:#8a9099;--hover:#e4e7ea}
+ body.dark{--fg:#e8e8ea;--bg:#17191e;--page:#0e1013;--muted:#8b93a1;--hover:rgba(127,127,127,.13)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);font:14px/20px "PingFang SC",system-ui,sans-serif;color:var(--fg);padding:16px}
 .grid{display:grid;grid-template-columns:360px 360px;gap:18px;justify-content:start}
 .sidebar{background:var(--bg);border-radius:10px;padding:8px 0}
 .groupSection{display:flex;flex-direction:column}
 .row{display:flex;align-items:center;gap:0;height:32px;padding:0 8px;border-radius:8px;color:var(--fg)}
-.row:hover{background:#e4e7ea}
-.row .slot{width:16px;height:20px;color:var(--muted);flex:none;display:inline-flex;justify-content:center;align-items:center}
+.row:hover{background:var(--hover)}
+.row .slot{height:20px;color:var(--muted);flex:none;display:inline-flex;justify-content:center;align-items:center}
 .row .title{flex:1;min-width:0;margin:0 6px 0 4px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
 .row .time{margin-left:auto;color:var(--muted);font-size:12px;padding-left:8px}
 .row .visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}
 .projectRow{display:flex;align-items:center;gap:0;height:32px;padding:0 8px;font-weight:600}
-.projectRow .slot{width:16px;height:20px;flex:none;display:inline-flex;justify-content:center;align-items:center;color:var(--muted)}
-.projectRow .chevron{width:16px}
+.projectRow .slot{height:20px;flex:none;display:inline-flex;justify-content:center;align-items:center;color:var(--muted)}
+.projectRow .chevron{color:var(--muted)}
 .projectRow .title{flex:1;margin:0 6px 0 4px}
-.projectRow .iconButton{border:none;background:transparent;color:var(--muted);cursor:pointer}
-[data-menu-material]{position:fixed;z-index:9999;top:60px;left:120px;background:#fff;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.28);padding:4px;display:none}
+.projectRow .iconButton{border:none;background:transparent;color:var(--muted);cursor:pointer;font:inherit}
+[data-menu-material]{position:fixed;z-index:9999;top:118px;left:150px;background:#fff;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.28);padding:4px;display:none}
+body.dark [data-menu-material]{background:#22262c;box-shadow:0 8px 24px rgba(0,0,0,.6)}
 [data-menu-material].open{display:block}
 [data-menu-material] .itemWrap{display:flex}
 [data-menu-material] button{display:flex;width:100%;align-items:center;gap:8px;padding:6px 10px;border:none;background:transparent;color:inherit;font:inherit;border-radius:6px;cursor:pointer;text-align:left}
-.cap{font-size:12px;color:#5f666e;margin:0 0 6px 2px}
+.cap{font-size:12px;color:var(--muted);margin:0 0 6px 2px}
+.fold{width:16px;height:16px;display:block}
 </style></head><body>
 <div class="grid">
   <div><p class="cap">同一项目（proj-states）跑完整个生命周期 · 颜色全程不变</p>
     <div class="sidebar">
       <div class="groupSection">
-        <div class="projectRow" data-row-key="workspace:proj-states"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-states</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="projectRow" data-row-key="workspace:proj-states"><span class="slot"><svg class="fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3l1.4 1.6h5.6a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V4.2Z"/></svg></span><span class="slot chevron">▸</span><span class="title">proj-states</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
         <div class="row" data-row-key="session:st-idle"><span class="slot"><span data-state="idle"></span></span><span class="title">idle · 安静</span><span class="time">现在</span></div>
-        <div class="row" data-row-key="session:st-thinking"><span class="slot"><span data-state="idle"></span></span><span class="title">thinking · 思考中</span><span class="time">现在</span></div>
-        <div class="row" data-row-key="session:st-tool"><span class="slot"><span data-state="idle"></span></span><span class="title">tool · 执行工具</span><span class="time">现在</span></div>
-        <div class="row" data-row-key="session:st-waiting"><span class="slot"><span data-state="idle"></span></span><span class="title">waiting · 等你确认</span><span class="time">现在</span></div>
-        <div class="row" data-row-key="session:st-error"><span class="slot"><span data-state="idle"></span></span><span class="title">error · 失败</span><span class="time">现在</span></div>
-        <div class="row" data-row-key="session:st-completed"><span class="slot"><span data-state="idle"></span></span><span class="title">completed · 刚完成</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-thinking"><span class="slot"><span data-state="ongoing"></span></span><span class="title">thinking · 思考中</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-tool"><span class="slot"><span data-state="ongoing"></span></span><span class="title">working · 执行工具</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-waiting"><span class="slot"><span data-state="warning"></span></span><span class="title">waiting · 等你确认</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-error"><span class="slot"><span data-state="warning"></span></span><span class="title">blocked · 任务已停止</span><span class="time">现在</span></div>
+        <div class="row" data-row-key="session:st-completed"><span class="slot"><span data-state="done"></span></span><span class="title">done · 刚完成</span><span class="time">现在</span></div>
       </div>
     </div>
   </div>
   <div><p class="cap">四个项目 · 默认色一眼可分（含定时任务时钟）</p>
     <div class="sidebar">
       <div class="groupSection">
-        <div class="projectRow" data-row-key="workspace:proj-alpha"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-alpha</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
-        <div class="row" data-row-key="session:p1a"><span class="slot"><span data-state="idle"></span></span><span class="title">核对表情与颜色设计规范（1）</span><span class="time">24 分钟</span></div>
+        <div class="projectRow" data-row-key="workspace:proj-alpha"><span class="slot"><svg class="fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3l1.4 1.6h5.6a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V4.2Z"/></svg></span><span class="slot chevron">▸</span><span class="title">proj-alpha</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p1a"><span class="slot"><span data-state="ongoing"></span></span><span class="title">核对表情与颜色设计规范（1）</span><span class="time">24 分钟</span></div>
         <div class="row" data-row-key="session:p1b"><span class="slot"><span data-state="idle"></span></span><span class="title">修复插件兼容性并重装</span><span class="time">14 小时</span></div>
       </div>
       <div class="groupSection">
-        <div class="projectRow" data-row-key="workspace:proj-beta"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-beta</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
-        <div class="row" data-row-key="session:p2a"><span class="slot"><span data-state="idle"></span></span><span class="title">继续未完成的这个任务，但…</span><span class="time">16 小时</span></div>
+        <div class="projectRow" data-row-key="workspace:proj-beta"><span class="slot"><svg class="fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3l1.4 1.6h5.6a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V4.2Z"/></svg></span><span class="slot chevron">▸</span><span class="title">proj-beta</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p2a"><span class="slot"><span data-state="warning"></span></span><span class="title">继续未完成的这个任务，但…</span><span class="time">16 小时</span></div>
       </div>
       <div class="groupSection">
-        <div class="projectRow" data-row-key="workspace:proj-gamma"><span class="slot">📁</span><span class="slot chevron">▸</span><span class="title">proj-gamma</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
-        <div class="row" data-row-key="session:p3a"><span class="slot"><span data-state="idle"></span></span><span class="title">等你确认的那个审批</span><span class="time">3 分钟</span></div>
+        <div class="projectRow" data-row-key="workspace:proj-gamma"><span class="slot"><svg class="fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3l1.4 1.6h5.6a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V4.2Z"/></svg></span><span class="slot chevron">▸</span><span class="title">proj-gamma</span><span class="rowActions"><button class="iconButton">⋯</button></span></div>
+        <div class="row" data-row-key="session:p3a"><span class="slot"><span data-state="done"></span></span><span class="title">等你确认的那个审批</span><span class="time">3 分钟</span></div>
       </div>
       <div class="groupSection">
         <div class="row" data-row-key="session:p4a"><span class="slot"><span data-state="idle"></span></span><span class="title">未分组的会话</span><span class="time">1 小时</span></div>
@@ -59,26 +62,77 @@ body{margin:0;background:var(--page);font:14px/20px "PingFang SC",system-ui,sans
 </div>
 <div data-menu-material><div class="itemWrap"><button role="menuitem"><span>✎</span><span>重命名</span></button></div><div class="itemWrap"><button role="menuitem" style="color:#e5484d"><span>🗑</span><span>删除工作区</span></button></div></div>
 <script>
-window.__openMenu = function (n) {
-  var row = document.querySelectorAll('.projectRow')[n]
-  document.querySelectorAll('.projectRow').forEach(function (r) { r.classList.remove('menuOpen') })
+// 这些页面是**文档截图台**：把宿主会返回的那两份 JSON 就地伪造，页面其余部分
+// 走产品真实的 lib/widget.js。场景由 URL 决定（?dark=1 / ?palette=1）。
+var Q = new URLSearchParams(location.search)
+if (Q.get('dark') === '1') document.body.classList.add('dark')
+
+// 每行状态：和宿主 state.json 同构。blocked 必须带停止证据，否则页面会（正确地）
+// 拒绝把它画成感叹号 —— 那正是 dsh-state.js 的「证据不足就不是停止」。
+var STATES = {
+  'st-idle': { phase: 'idle' },
+  'st-thinking': { phase: 'thinking', detail: 'step 2' },
+  'st-tool': { phase: 'working', detail: 'bash' },
+  'st-waiting': { phase: 'waiting', detail: 'approval' },
+  'st-error': { phase: 'blocked', detail: 'RATE_LIMIT', stopCertain: true, stopCause: 'error', stopSource: 'turn/end', stopCode: 'RATE_LIMIT', stopTurnKey: 'st-error#1', turnKey: 'st-error#1' },
+  'st-completed': { phase: 'done' },
+  'p1a': { phase: 'working', detail: 'read' },
+  'p1b': { phase: 'thinking' },
+  'p2a': { phase: 'waiting', detail: 'question' },
+  'p3a': { phase: 'done' },
+  'p4a': { phase: 'idle' }
+}
+// 只有**显式选过颜色**的项目才进配色表 —— 这也正是「文件夹默认跟随 DSH」的分界线：
+// proj-states 故意不在这里，所以它的文件夹保持 DSH 原生色、调色板也不假装已选。
+// ?ink=1 时才给它一个显式色，用来对照「已设置」的样子。
+var PROJECTS = { 'proj-alpha': '#9159fe', 'proj-beta': '#1084fe', 'proj-gamma': '#ff9800' }
+if (Q.get('ink') === '1') PROJECTS['proj-states'] = '#97683d'
+
+function fake(body) {
+  return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+}
+var realFetch = window.fetch
+window.fetch = function (url, opts) {
+  var u = String(url)
+  if (u.indexOf('/dsh-grok-buddy/state.json') !== -1) {
+    var now = Date.now()
+    var sessions = []
+    for (var id in STATES) sessions.push(Object.assign({ id: id, reason: 'demo', completionKey: id + '#0' }, STATES[id]))
+    return fake({ ok: true, now: now, sessions: sessions })
+  }
+  if (u.indexOf('/dsh-grok-buddy/colors.json') !== -1) {
+    return fake({ version: 1, projects: PROJECTS })
+  }
+  return realFetch.call(window, url, opts)
+}
+
+// ?palette=1：真的打开产品那条路径 —— 给项目行挂 menuOpen、塞 DSH 的菜单容器、
+// 等插件把「颜色」项补进去，再点它。不自己造调色板 DOM。
+// 截图要的是「调色板打开后」这一帧：入口点完立刻收起菜单，所以这里再补一次菜单态，
+// 让图里同时看得到「⋯ → 颜色」的入口和调色板本身。
+function openPalette() {
+  var row = document.querySelector('[data-row-key="workspace:proj-states"]')
+  if (row === null) return
   row.classList.add('menuOpen')
-  var s = document.querySelector('[data-menu-material]')
-  s.classList.add('open'); s.style.display = 'block'
+  var menu = document.querySelector('[data-menu-material]')
+  menu.classList.add('open')
+  menu.style.display = 'block'
+  var tries = 0
+  var timer = setInterval(function () {
+    var item = document.querySelector('.dsgb-menu-item button')
+    if (item !== null) {
+      clearInterval(timer)
+      item.click()
+      // 点完产品会收起菜单；截图台把菜单重新立起来，只为了让「入口在哪」可见。
+      setTimeout(function () {
+        var m = document.querySelector('[data-menu-material]')
+        m.classList.add('open')
+        m.style.display = 'block'
+      }, 120)
+    }
+    else if (++tries > 80) clearInterval(timer)
+  }, 50)
 }
-window.__closeMenu = function () {
-  document.querySelectorAll('.projectRow').forEach(function (r) { r.classList.remove('menuOpen') })
-  document.querySelector('[data-menu-material]').style.display = 'none'
-}
-document.addEventListener('click', function (e) { if (e.target === document.body) window.__closeMenu() })
-;[].forEach.call(document.querySelectorAll('.iconButton'), function (btn, i) {
-  btn.addEventListener('click', function (e) { e.stopPropagation(); window.__openMenu(i) })
-})
-window.__addClock = function (id) {
-  var slot = document.querySelector('[data-row-key="session:' + id + '"] [data-dsgb-slot]')
-  var m = document.createElement('span'); m.className = 'mark'; m.setAttribute('data-session-schedule-mark', '')
-  m.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span class="visuallyHidden">1 个定时任务</span>'
-  slot.appendChild(m)
-}
+if (Q.get('palette') === '1') setTimeout(openPalette, 900)
 </script>
 <script src="../lib/widget.js"></script></body></html>

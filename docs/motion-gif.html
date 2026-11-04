@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>六态动态说明</title><style>
+ body{margin:0;padding:14px 16px;background:#0f1114;color:#e8e8ea;font:12px/1.5 -apple-system,"PingFang SC",sans-serif}
+ .pane{background:#17191e;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:6px 0;width:430px}
+ .row{display:flex;align-items:center;height:30px;padding:0 10px;gap:8px}
+ .slot{height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+ .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:#dfe3ea}
+ .tag{font-size:9.5px;color:#6b7280;font-family:ui-monospace,Menlo,monospace;flex:none}
+</style></head><body>
+<div class="pane" id="pane"></div>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
+import { createBot, runBot } from '../src/grokbot/engine.js'
+import { PHASE_TO_MOTION } from '../src/mapping.js'
+
+// 每行一个状态，全部用**产品同一个渲染器**实时跑 —— 这就是侧栏里能看到的东西，
+// 不是另做的演示动画。
+const ROWS = [
+  ['idle', '空闲 · 等你回来', '#9159fe'],
+  ['working', '正在处理 · 跑工具', '#9159fe'],
+  ['waiting', '正在等待 · 要你确认', '#9159fe'],
+  ['thinking', '思考 · 模型在跑', '#1084fe'],
+  ['blocked', '已阻止 · 任务级错误停止', '#ff9800'],
+  ['done', '完成 · 刚干完', '#00bca6'],
+]
+const pane = document.getElementById('pane')
+for (const [phase, text, ink] of ROWS) {
+  const row = document.createElement('div')
+  row.className = 'row'
+  const slot = document.createElement('span')
+  slot.className = 'slot'
+  slot.style.width = '20px'
+  const inst = createBot({ shape: TB_SHAPES.blob, expressions: TB_EXPRESSIONS, bodyFill: ink, eyeFill: '#17191e', size: 20 })
+  inst.state = PHASE_TO_MOTION[phase]
+  slot.appendChild(inst.svg)
+  runBot(inst, { reduced: false })
+  const name = document.createElement('span')
+  name.className = 'name'
+  name.textContent = text
+  const tag = document.createElement('span')
+  tag.className = 'tag'
+  tag.textContent = phase
+  row.append(slot, name, tag)
+  pane.appendChild(row)
+}
+window.__ready = true
+</script>
+</body></html>

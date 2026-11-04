@@ -85,7 +85,7 @@ function render(target, phase, label, desc, size) {
 const big = grid('六态的实际形态（64px，同一身份色）')
 for (const [phase, label, desc] of PHASES) render(big, phase, label, desc, 64)
 
-const small = grid('同一只头像在侧栏里的真实尺寸（16px）')
-for (const [phase] of PHASES) render(small, phase, '', '', 16)
+const small = grid('同一只头像在侧栏里的真实尺寸（20px，BOT_SIZE）')
+for (const [phase] of PHASES) render(small, phase, '', '', 20)
 </script>
 </body></html>

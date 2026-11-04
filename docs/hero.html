@@ -2,19 +2,21 @@
 <title>dsh-grok-buddy · hero</title>
 <style>
  *{box-sizing:border-box}
- body{margin:0;padding:34px 38px 30px;background:#0e1013;color:#e8e8ea;
+ body{margin:0;padding:30px 34px 26px;background:#0e1013;color:#e8e8ea;
       font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;
       -webkit-font-smoothing:antialiased}
- .cap{font-size:13px;color:#8b93a1;margin:0 0 20px}
+ .cap{font-size:13px;color:#8b93a1;margin:0 0 18px;max-width:900px}
  .cap b{color:#c9cdd6;font-weight:600}
- .panes{display:flex;gap:26px;align-items:flex-start}
- .pane{width:300px;background:#17191e;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px;flex:none}
+ .panes{display:flex;gap:24px;align-items:flex-start}
+ .pane{width:296px;background:#17191e;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px;flex:none}
  .head{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px}
  .head .t{font-size:13px;font-weight:600;color:#d8dbe2;letter-spacing:.01em}
  .head .pill{font-size:10px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.06);color:#8b93a1}
- .row{display:flex;align-items:center;height:34px;padding:0 8px;border-radius:8px;gap:6px}
+ .proj{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;font-size:11.5px;color:#9aa2b0}
+ .proj .fold{width:14px;height:14px;color:#6b7280;flex:none}
+ .row{display:flex;align-items:center;height:32px;padding:0 8px;border-radius:8px;gap:6px}
  .row.on{background:rgba(127,127,127,.13)}
- .slot{width:18px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+ .slot{height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
  .dot{width:8px;height:8px;border-radius:50%;display:block}
  .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:#dfe3ea}
  .tag{font-size:9.5px;color:#6b7280;font-family:ui-monospace,Menlo,monospace;flex:none}
@@ -22,16 +24,15 @@
       margin:0 0 8px 4px;font-weight:600}
  .after .lab{color:#7c8cff}
  .col{display:flex;flex-direction:column}
- .side{flex:1;padding-top:2px;display:flex;flex-direction:column;gap:12px;min-width:230px}
- .note{font-size:12px;line-height:1.65;color:#98a0ae}
+ .side{flex:1;padding-top:2px;display:flex;flex-direction:column;gap:11px;min-width:250px}
+ .note{font-size:12px;line-height:1.65;color:#98a0ae;margin:0}
  .note b{color:#dfe3ea;font-weight:600}
- .kbd{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:rgba(255,255,255,.06);
-      padding:1px 5px;border-radius:4px;color:#c9cdd6}
- .legend{display:flex;flex-wrap:wrap;gap:5px 14px;margin-top:14px}
+ .legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
  .lg{display:flex;align-items:center;gap:5px;font-size:11px;color:#9aa2b0}
- .lg .dot{width:6px;height:6px}
+ .lg .dot{width:7px;height:7px}
+ .split{height:1px;background:rgba(255,255,255,.07);margin:12px 0}
 </style></head><body>
-<p class="cap">同一份会话列表 —— <b>左边是 DSH 默认的彩色小圆点</b>，<b>右边是装上 dsh-grok-buddy 之后</b>。头像是 Grok Bot 本人的那张脸，状态直接画在脸上。</p>
+<p class="cap">同一份会话列表 —— <b>左边是 DSH 默认的彩色小圆点</b>，<b>右边是装上 dsh-grok-buddy 之后</b>。位置、行高都没变，只是圆点换成了一张会动的 Grok Bot 脸。</p>
 
 <div class="panes">
   <div class="col">
@@ -49,49 +50,72 @@
   </div>
 
   <div class="side">
-    <p class="note">每只脸就是一个状态：<b>紫色在思考</b>、<b>蓝色在干活</b>（吐字和跑工具同色，脸不一样）、<b>橙色在等你</b>、<b>红色是失败了</b>、<b>绿色是刚干完</b>。墨色全部取自 x.ai 官方 Grok Bot 的 ink。</p>
-    <p class="note">鼠标悬停会显示细节，比如正在跑哪个工具、失败代号、重试第几次。</p>
-    <p class="note">不新增任何 UI 元素 —— 只是把原来那个圆点换成一面会动的脸，位置和 1:1 尺寸都没变。</p>
+    <p class="note"><b>颜色 = 哪个项目</b>（DSH Workspace，一个项目一个墨色，切状态一像素都不变）；
+      <b>动作 = 这一刻在干嘛</b>。</p>
+    <p class="note">六种状态各有各的形态：空闲是圆脸竖眼，在干活会甩头带一道短拖尾，
+      等你确认是压扁的横线眼，已阻止整张脸退出换成感叹号，思考是三颗点脉动，完成有 6 条彩色轨道绕着转。</p>
+    <p class="note">不新增任何 UI 元素 —— 前导位里原来那个圆点直接换成头像，20px 与宿主槽位同高。</p>
     <div class="legend" id="legend"></div>
+    <div class="split"></div>
+    <p class="note" style="font-size:11px;color:#6b7280">悬停可看细节：正在跑哪个工具、失败代号、重试第几次。</p>
   </div>
 </div>
 
 <script>
-window.__GROK_BUDDY_DEMO__ = {
+// 状态快照：与宿主 GET /dsh-grok-buddy/state.json 的真实形状一致
+window.__DEMO__ = {
   now: Date.now(),
   sessions: [
     { id: 'a1', phase: 'thinking', detail: 'step 2' },
     { id: 'a2', phase: 'working',  detail: 'bash' },
-    { id: 'a3', phase: 'waiting',  detail: 'write' },
-    { id: 'a4', phase: 'working',  detail: '' },
-    { id: 'a5', phase: 'done',     detail: '' },
-    { id: 'a6', phase: 'blocked',  detail: 'RATE_LIMIT / 2' },
-    { id: 'a7', phase: 'blocked',  detail: 'QUOTA' }
+    { id: 'a3', phase: 'waiting',  detail: 'approval' },
+    { id: 'a4', phase: 'done',     detail: '' },
+    { id: 'a5', phase: 'blocked',  detail: 'RATE_LIMIT', stopCertain: true, stopCause: 'error', stopSource: 'turn/end', stopCode: 'RATE_LIMIT', stopTurnKey: 'a5#1', turnKey: 'a5#1' },
+    { id: 'a6', phase: 'idle',     detail: '' },
+    { id: 'a7', phase: 'working',  detail: 'write' }
   ]
 };
 const realFetch = window.fetch;
 window.fetch = function (url, opts) {
-  if (String(url).indexOf('/dsh-grok-buddy/state.json') !== -1) {
-    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__GROK_BUDDY_DEMO__)),
+  const u = String(url);
+  if (u.indexOf('/dsh-grok-buddy/state.json') !== -1) {
+    return Promise.resolve(new Response(JSON.stringify(Object.assign({ ok: true }, window.__DEMO__)),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  if (u.indexOf('/dsh-grok-buddy/colors.json') !== -1) {
+    return Promise.resolve(new Response(JSON.stringify({ version: 1, projects: window.__COLORS__ || {} }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }));
   }
   return realFetch.call(this, url, opts);
 };
 
-const ROWS = [
-  ['a1', '插件适配 dsh',    '#9159fe', '思考'],
-  ['a2', '修复 BiliSail',   '#1084fe', '工具'],
-  ['a3', 'PiliPlus 编译',   '#ff9800', '待确认'],
-  ['a4', '写发布说明',      '#1084fe', '输出'],
-  ['a5', '资源占用排查',     '#00c972', '完成'],
-  ['a6', '重构 derive.js',  '#ff9800', '重试'],
-  ['a7', '迁移到 pnpm',     '#ff263c', '失败']
+// 项目（DSH Workspace）行 + 会话行；颜色由插件按 workspaceId 推，这里只给稳定 id
+const PROJECTS = [
+  ['proj-alpha', '#9159fe', [
+    ['a1', '插件适配 dsh', '思考'],
+    ['a2', '修复 BiliSail', '执行工具']
+  ]],
+  ['proj-beta', '#1084fe', [
+    ['a3', 'PiliPlus 编译', '等你确认'],
+    ['a4', '资源占用排查', '刚完成']
+  ]],
+  ['proj-gamma', '#ff9800', [
+    ['a5', '重构 derive.js', '已阻止'],
+    ['a7', '迁移到 pnpm', '执行工具']
+  ]],
+  [null, null, [
+    ['a6', '写发布说明', '空闲']
+  ]]
 ];
 
-function makeRow(id, title) {
+const FOLDER = '<svg class="fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 4.2a1.2 1.2 0 0 1 1.2-1.2h3l1.4 1.6h5.6a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V4.2Z"/></svg>';
+
+// before 面板给的是**纯静态圆点**：故意不写 data-row-key，插件不会接管它
+// （否则左右两边都变成头像，对照就没了）。
+function makeRow(id, title, tag, plain) {
   const row = document.createElement('div');
   row.className = 'row';
-  row.setAttribute('data-row-key', 'session:' + id);
+  row.setAttribute(plain ? 'data-demo-key' : 'data-row-key', 'session:' + id);
   const slot = document.createElement('span');
   slot.className = 'slot';
   row.appendChild(slot);
@@ -99,49 +123,69 @@ function makeRow(id, title) {
   name.className = 'name';
   name.textContent = title;
   row.appendChild(name);
+  if (tag) {
+    const t = document.createElement('span');
+    t.className = 'tag';
+    t.textContent = tag;
+    row.appendChild(t);
+  }
   return { row: row, slot: slot };
 }
 
 const before = document.getElementById('before');
 const after = document.getElementById('after');
-for (const r of ROWS) {
-  const b = makeRow(r[0], r[1]);
-  const dot = document.createElement('span');
-  dot.className = 'dot';
-  dot.setAttribute('data-state', 'idle');
-  dot.style.background = r[2];
-  b.slot.appendChild(dot);
-  before.appendChild(b.row);
-  after.appendChild(makeRow(r[0], r[1]).row);
+window.__COLORS__ = {};
+for (const [wsId, ink, rows] of PROJECTS) {
+  let beforeSection;
+  let afterSection;
+  if (wsId === null) {
+    beforeSection = document.createElement('div');
+    afterSection = document.createElement('div');
+    before.appendChild(beforeSection);
+    after.appendChild(afterSection);
+  } else {
+    window.__COLORS__[wsId] = ink;
+    for (const [host, isAfter] of [[before, false], [after, true]]) {
+      const section = document.createElement('div');
+      section.className = 'groupSection';
+      const proj = document.createElement('div');
+      proj.className = 'proj';
+      proj.setAttribute('data-row-key', 'workspace:' + wsId);
+      proj.innerHTML = FOLDER + '<span>' + wsId + '</span>';
+      section.appendChild(proj);
+      host.appendChild(section);
+      if (isAfter) afterSection = section;
+      else beforeSection = section;
+    }
+  }
+  for (const [id, title, tag] of rows) {
+    const b = makeRow(id, title, tag, true);
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.setAttribute('data-state', 'idle');
+    dot.style.background = ink || '#9a9a9a';
+    b.slot.appendChild(dot);
+    beforeSection.appendChild(b.row);
+    afterSection.appendChild(makeRow(id, title, tag).row);
+  }
 }
 document.querySelector('#after .row').classList.add('on');
 
-// widget 通过轮询接管 #after 里每一行的状态位
+// 插件接管 #after 里每一行的前导位
 const s = document.createElement('script');
 s.src = '../lib/widget.js';
 document.head.appendChild(s);
 
-// 让头像保持 18px（侧栏真实尺寸），并留一点呼吸空间
-setInterval(function () {
-  document.querySelectorAll('svg.dsgb-bot').forEach(function (svg) {
-    svg.setAttribute('width', '18');
-    svg.setAttribute('height', '18');
-  });
-}, 90);
-
-// 图例：小圆点对应相位
+// 图例：颜色是项目身份，不是状态
 const legend = document.getElementById('legend');
-// 官方生命周期六色 + 两个细分相位（tool 与 streaming 同色、retry 与 waiting 同色）
-const LG = [['#9159fe','思考'],['#1084fe','输出/工具'],['#ff9800','等你/重试'],
-            ['#ff263c','失败'],['#00c972','完成'],['#9a9a9a','安静']];
-for (const g of LG) {
+for (const pair of [['proj-alpha', '#9159fe'], ['proj-beta', '#1084fe'], ['proj-gamma', '#ff9800'], ['未分组', '#00bca6']]) {
   const el = document.createElement('span');
   el.className = 'lg';
   const d = document.createElement('span');
   d.className = 'dot';
-  d.style.background = g[0];
+  d.style.background = pair[1];
   el.appendChild(d);
-  el.appendChild(document.createTextNode(g[1]));
+  el.appendChild(document.createTextNode(pair[0]));
   legend.appendChild(el);
 }
 </script>

@@ -1,0 +1,66 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>侧栏真实尺寸：16px vs 20px</title><style>
+ body{margin:0;padding:22px 24px 26px;background:#15171c;color:#e8e8ea;font:13px/1.55 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
+ h1{font-size:15px;font-weight:600;margin:0 0 5px;color:#f0f1f3}
+ .sub{font-size:12px;color:#8b93a1;margin:0 0 16px;max-width:820px}
+ .side{background:#1b1d22;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:8px 0;width:420px}
+ .head{font-size:11px;letter-spacing:.06em;color:#7b8494;font-weight:600;padding:2px 10px 8px}
+ .row{display:flex;align-items:center;height:32px;padding:0 8px;gap:6px}
+ .row.on{background:rgba(127,127,127,.13);border-radius:8px}
+ .slot{height:20px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+ .name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;color:#dfe3ea}
+ .tag{font-size:10px;color:#6b7280;font-family:ui-monospace,Menlo,monospace}
+ .panes{display:flex;gap:22px;align-items:flex-start}
+ .note{font-size:11px;color:#7b8494;margin:12px 0 0;max-width:880px;line-height:1.65}
+ code{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;color:#c9cdd6}
+</style></head><body>
+<h1>同一套渲染器，只改尺寸：16px（宿主原生状态点）对比 20px（现在）</h1>
+<p class="sub">截图是真实浏览器渲染（设备像素比 2），不是把预览放大冒充「看得清」。20px 恰好等于宿主前导位高度，行高 32px 不撑破。</p>
+<div class="panes">
+  <div class="side" id="p16"><div class="head">16px · 旧尺寸</div></div>
+  <div class="side" id="p20"><div class="head">20px · 现在（BOT_SIZE）</div></div>
+</div>
+<p class="note">
+  差别全在最难认的两态：<strong>blocked 的感叹号竖条</strong>与<strong>thinking 的三颗点</strong>。
+  16px 下竖条约 1.0 CSS px、三点几乎撑满图标；20px 下单点 3.7–4.5 CSS px，三点整体 15.5 px，
+  才分得清「感叹号」和「三颗点」。量测见 <code>docs/motion-spec.md</code>。
+</p>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
+import { createBot, runBot } from '../src/grokbot/engine.js'
+import { PHASE_TO_MOTION } from '../src/mapping.js'
+
+const INK = '#1084fe'
+const SURFACE = '#1b1d22'
+const ITEMS = [
+  ['idle', '空闲 · 等你回来'],
+  ['working', '正在处理 · 跑工具'],
+  ['waiting', '正在等待 · 要你确认'],
+  ['blocked', '已阻止 · 任务级错误停止'],
+  ['thinking', '思考 · 模型在跑'],
+  ['done', '完成 · 刚干完'],
+]
+
+for (const [pane, size] of [[document.getElementById('p16'), 16], [document.getElementById('p20'), 20]]) {
+  for (const [phase, text] of ITEMS) {
+    const row = document.createElement('div')
+    row.className = 'row'
+    const slot = document.createElement('span')
+    slot.className = 'slot'
+    slot.style.width = size + 'px'
+    const inst = createBot({ shape: TB_SHAPES.blob, expressions: TB_EXPRESSIONS, bodyFill: INK, eyeFill: SURFACE, size })
+    inst.state = PHASE_TO_MOTION[phase]
+    slot.appendChild(inst.svg)
+    runBot(inst, { reduced: true })
+    const name = document.createElement('span')
+    name.className = 'name'
+    name.textContent = text
+    const tag = document.createElement('span')
+    tag.className = 'tag'
+    tag.textContent = size + 'px'
+    row.append(slot, name, tag)
+    pane.appendChild(row)
+  }
+}
+document.querySelector('#p20 .row').classList.add('on')
+</script>
+</body></html>

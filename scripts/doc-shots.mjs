@@ -140,13 +140,13 @@ async function main() {
     })()`)
     await shoot('states-64.png', { ...bigGrid, scale: 3 })
 
-    // 16px 那一排（按 8 倍截，便于在文档里看清真实像素）
+    // 20px 那一排（BOT_SIZE，按 8 倍截，便于在文档里看清真实像素）
     const smallGrid = await evaluate(`(() => {
       const grids = document.querySelectorAll('.grid')
       const plane = grids[1].getBoundingClientRect()
       return { x: Math.max(0, plane.x - 4), y: Math.max(0, plane.y - 4), width: plane.width + 8, height: plane.height + 8 }
     })()`)
-    await shoot('states-16.png', { ...smallGrid, scale: 8 })
+    await shoot('states-20.png', { ...smallGrid, scale: 8 })
 
     // faces 页
     await cdp.send('Page.navigate', { url: 'http://127.0.0.1:' + port + '/docs/faces.html' })

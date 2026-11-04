@@ -1,23 +1,30 @@
-<div align="center">
-
-<img src="./assets/icon-180.png" width="88" alt="dsh-grok-buddy icon">
-
-<img src="./docs/hero.png" alt="dsh-grok-buddy — DSH 侧栏会话列表：左边是默认圆点，右边是 Grok Bot 的脸" style="max-width: 860px; width: 100%">
-
 # dsh-grok-buddy
 
-**把 Grok Bot 本人那张脸，装进 DeepSeek Harness 的会话列表。**
+<p align="center">
+  <img src="./assets/icon-180.png" width="88" alt="dsh-grok-buddy 图标">
+</p>
 
-每个会话（任务）在侧栏的那一行，原来的彩色小圆点换成一只会呼吸的 GrokBot 头像：
-它在思考、在跑工具、在等你点确认、失败了、还是刚干完 —— **看脸就知道**。
+<h3 align="center">把 Grok Bot 本人那张脸，装进 DeepSeek Harness 的会话列表</h3>
 
-<img src="./docs/effect.gif" alt="dsh-grok-buddy 实际效果：侧栏会话行里的 GrokBot 头像在眨眼、转动眼珠" style="max-width: 560px; width: 100%">
+<p align="center">
+  每个会话在侧栏那一行，原来的彩色小圆点换成一只会呼吸的 GrokBot 头像。<br>
+  它在思考、在跑工具、在等你点确认、失败了、还是刚干完 —— <b>看脸就知道</b>。
+</p>
 
-[![DSH Plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4f7cff)](https://github.com/topics/dsh-plugin)
-[![release](https://img.shields.io/github/v/release/devzer0o0/dsh-grok-buddy)](https://github.com/devzer0o0/dsh-grok-buddy/releases)
-[![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](./LICENSE)
+<p align="center">
+  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4f7cff" alt="DSH plugin"></a>
+  <a href="https://github.com/devzer0o0/dsh-grok-buddy/releases"><img src="https://img.shields.io/github/v/release/devzer0o0/dsh-grok-buddy" alt="release"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue" alt="license"></a>
+  <img src="https://img.shields.io/badge/Node-%E2%89%A522-informational" alt="Node >= 22">
+</p>
 
-</div>
+<p align="center">
+  <img src="./docs/hero.png" width="880" alt="同一份会话列表：左边是 DSH 默认彩色圆点，右边是装上 dsh-grok-buddy 之后的 GrokBot 头像">
+</p>
+
+<p align="center"><sub>左边是 DSH 默认的彩色小圆点，右边是装上之后。位置、行高、槽位宽度都没变，只是圆点换成了一张脸。</sub></p>
+
+---
 
 ## 这是什么
 
@@ -27,7 +34,31 @@
 一颗圆滚滚的 blob，两只眼睛贴在球面上，转头时会跟着透视变形、转到背面会消失；
 表情切换是带弹簧的形变，平时还会随机眨眼。
 
-<p align="center"><img src="./docs/states.png" width="720" alt="六种运行状态：空闲 / 正在处理 / 正在等待 / 已阻止 / 思考 / 完成"></p>
+<p align="center">
+  <img src="./docs/states.png" width="820" alt="六种运行状态：空闲 / 正在处理 / 正在等待 / 已阻止 / 思考 / 完成">
+</p>
+
+它真的会动 —— 下面这张是从产品渲染器逐帧抓下来的（不是示意图）：
+
+<p align="center">
+  <img src="./docs/effect.gif" width="560" alt="六态实时动画：空闲眨眼转头、working 甩头带拖尾、waiting 横线眼呼吸、blocked 感叹号静止、thinking 三点脉动、done 轨道环绕">
+</p>
+
+## 目录
+
+- [这是什么](#这是什么)
+- [为什么是这张脸](#为什么是这张脸)
+- [三层分开：状态 / 动作 / 表情](#三层分开状态--动作--表情)
+- [六态判定（唯一语义）](#六态判定唯一语义)
+- [颜色是身份，动作是状态](#颜色是身份动作是状态)
+- [界面适配：不是只有侧栏那一种行](#界面适配不是只有侧栏那一种行)
+- [安装](#安装)
+- [刷新、重启与验收](#刷新重启与验收三件事不一样)
+- [诊断（默认关闭）](#诊断默认关闭)
+- [工作原理](#工作原理)
+- [开发](#开发)
+- [未完成与已知边界](#未完成与已知边界)
+- [致谢与许可](#致谢与许可)
 
 ## 为什么是这张脸
 
@@ -39,9 +70,17 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 > how much of the lifecycle the avatar itself could carry.
 
 所以这里也照做：**不新增任何 UI 元素**，只把侧栏原本那个彩色小圆点换成一个会呼吸的头像。
-位置、行高全都不变，尺寸从原生状态点的 16px 放大到 **20px**（等于宿主前导位高度）：
-它就在原来那个位置，只是开始有表情了，而且侧栏里看得清 —— 16px 下的感叹号竖条约
-1.0 CSS px、三颗点几乎撑满图标，分不清是哪一种。
+位置、行高全都不变，尺寸从宿主原生状态点的 16px 放大到 **20px**（等于宿主前导位高度）。
+
+为什么不是 16px —— 因为 16px 下根本分不清：
+
+<p align="center">
+  <img src="./docs/size-compare.png" width="820" alt="16px 与 20px 并排：16px 下感叹号竖条约 1 CSS px、三点几乎撑满图标，20px 下才分得清">
+</p>
+
+16px 下感叹号竖条约 **1.0 CSS px**、三颗点几乎撑满图标，两种形态糊成一团；
+20px 下单点 3.7–4.5 CSS px、三点整体 15.5 px，才分得清「感叹号」和「三颗点」。
+20px 也正好等于宿主前导位高度（`.slot{height:20px}`），会话行高 32px 仍放得下，不撑破行。
 
 ## 三层分开：状态 / 动作 / 表情
 
@@ -49,22 +88,22 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 
 | 层 | 是什么 | 出现在哪里 |
 | --- | --- | --- |
-| **运行状态**（runtimePhase / displayPhase） | **只有六种**：idle / working / waiting / blocked / thinking / done | 接口、文档、读屏标签、data-dsgb-phase |
-| **动作**（motion） | 内部动画资源名：rest / spin / half-lidded / bang / tri-dot / orbit | data-dsgb-motion（明确标注是动画资源） |
-| **图形构成**（figure） | 这一态画的是什么：avatar / avatar+trail / exclamation / dots / avatar+orbit | data-dsgb-figure |
+| **运行状态**（runtimePhase / displayPhase） | **只有六种**：idle / working / waiting / blocked / thinking / done | 接口、文档、读屏标签、`data-dsgb-phase` |
+| **动作**（motion） | 内部动画资源名：rest / spin / half-lidded / bang / tri-dot / orbit | `data-dsgb-motion`（明确标注是动画资源） |
+| **图形构成**（figure） | 这一态画的是什么：avatar / avatar+trail / exclamation / dots / avatar+orbit | `data-dsgb-figure` |
 | **表情素材**（expression） | 25 张眼型，只服务 idle / working / done 的眼睛造型 | 只在渲染引擎内部 |
 
 所以：
 
-* **素材库有多少条,不等于插件有多少种状态。** 素材库里还有 proud、excited、
+* **素材库有多少条，不等于插件有多少种状态。** 素材库里还有 proud、excited、
   curious、sleeping 等二十多个预设，它们**不是**运行状态，也不再是六态动画的实现。
-* **表情图里的名字,不等于运行状态。** docs/faces.html 里那些 sleeping / waking /
-  searching / curious / proud 只是 idle 的表情素材参考，不参与会话状态判定。
+* **表情图里的名字，不等于运行状态。** [docs/faces.html](docs/faces.html) 里那些 sleeping /
+  waking / searching / curious / proud 只是 idle 的表情素材参考，不参与会话状态判定。
 * 事实与标志位（selected / seen / consumed / stale）也不是状态。
 
 ## 六态判定（唯一语义）
 
-实现在 src/decision.js，宿主与页面**共用这一份**，没有第二套优先级。
+实现在 [src/decision.js](src/decision.js)，宿主与页面**共用这一份**，没有第二套优先级。
 
 | 状态 | 中文 | 判定条件 |
 | --- | --- | --- |
@@ -83,13 +122,13 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 它明确**不**表示：出现过错误 / 有一条 error 记录 / 某个工具调用失败 / 模型正在自动重试 /
 暂时没有输出 / 网络看起来异常 / 用户主动取消。
 
-事实分三层，代码里也分开存（lib/fold.js）：
+事实分三层，代码里也分开存（[lib/fold.js](lib/fold.js)）：
 
 | 层 | 字段 | 作用 |
 | --- | --- | --- |
-| A. 错误诊断 | facts.error | 某次工具/请求/重试报了什么错。**只用于日志与 tooltip，不参与判定** |
-| B. 自动恢复 | facts.retry | 当前轮是否仍有有效的重试调度/正在重试。让任务保持 thinking |
-| C. 任务级停止 | facts.stop | 哪一轮、因什么错、由哪个权威事实确认停下。**只有它能推出 blocked** |
+| A. 错误诊断 | `facts.error` | 某次工具/请求/重试报了什么错。**只用于日志与 tooltip，不参与判定** |
+| B. 自动恢复 | `facts.retry` | 当前轮是否仍有有效的重试调度/正在重试。让任务保持 thinking |
+| C. 任务级停止 | `facts.stop` | 哪一轮、因什么错、由哪个权威事实确认停下。**只有它能推出 blocked** |
 
 ### 判定顺序（不可交换）
 
@@ -98,8 +137,9 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 3. **当前有效非错误结束**（取消 / 截断 / 未知）→ idle。
 4. 未终止且有挂起交互 → waiting。
 5. 未终止且有未结束工具 → working。
-6. 未终止且模型在跑**或自动重试仍有效** → thinking。
-7. 其余（含静默）→ idle。**沉默既不冒充 done，也不冒充 blocked。**
+6. 未终止且仍有**有效的自动重试** → thinking（先于静默，退避可能长于静默阈值）。
+7. 未终止且模型在跑 → thinking。
+8. 其余（含静默）→ idle。**沉默既不冒充 done，也不冒充 blocked。**
 
 几条明确的边界：
 
@@ -125,13 +165,9 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 | `userQuestions` 投影 | `sessionProjections.stateOf(session, 'userQuestions')` | **带 timeout** 的 `ask_user_question` 和计划评审 |
 | 未结束的交互式工具调用 | `tool/call` 名为 `ask_user_question` / `exit_plan_mode` 且结果未回 | **阻塞式**提问与评审（它们根本不进投影） |
 
-⚠️ **投影的 raw state ≠ wire view**。这是踩过的坑：
-
-```text
-stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled } }
-曾经的误读         state.active            ← 永远 undefined，挂起提问被算成 working
-正确路径           state.questions.active
-```
+> **投影的 raw state ≠ wire view**。这是踩过的坑：
+> `stateOf()` 返回 `{ inheritedEventCount, timed, questions: { active, settled } }`，
+> 而 `state.active` 永远 undefined —— 读错就会把挂起提问算成 working。正确路径是 `state.questions.active`。
 
 `active` 里两种状态都算「还要人回答」：`open`（正在等）与 `continued`
 （带 timeout 的提问超时返回 pending，用户仍可回答）。
@@ -159,7 +195,7 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 * 同一完成记录被消费后，旧 DOM / 旧快照的 done **不能**让它重新复活；
 * 新一轮完成可以建立**新的**展示周期（completionKey 不同）。
 
-完成身份按 completionKey（sessionId#turn）记，**不是**按会话 id 一刀切。
+完成身份按 `completionKey`（sessionId#turn）记，**不是**按会话 id 一刀切。
 缺 completedAt 时用页面的「首次观测时刻」作稳定锚点，所以「无法标记已查看、
 永远活跃」不会发生。
 
@@ -194,22 +230,21 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 * 兜底完成同样受失活阈值约束，超时后退出 done（不是一直灰色庆祝）。
 
 **限制**：`generation` 是页面内存里的保守计数。页面重载或宿主重启后它从零开始，
-因此跨重启的严格去重**不成立**；本插件不把生命周期元数据写入磁盘，也就不需要
-版本与清理机制，但也拿不到跨重启的完成身份。这是已知边界，不宣称更强保证。
+因此跨重启的严格去重**不成立**。这是已知边界，不宣称更强保证。
 
 ### 两个阈值（实现参数，集中在 src/decision.js）
 
 | 常量 | 值 | 用途 |
 | --- | --- | --- |
-| TURN_SILENCE_TTL_MS | 3 分钟 | 一个 turn 开着却既无工具、无交互、无新事件时，**降级为 idle**。长工具与长等待不受影响。 |
-| DONE_DISPLAY_TTL_MS | 5 分钟 | 完成展示的活跃期上限。用户仍选中查看时按选中规则处理。 |
+| `TURN_SILENCE_TTL_MS` | 3 分钟 | 一个 turn 开着却既无工具、无交互、无新事件时，**降级为 idle**。长工具与长等待不受影响。 |
+| `DONE_DISPLAY_TTL_MS` | 5 分钟 | 完成展示的活跃期上限。用户仍选中查看时按选中规则处理（见 [src/widget/activity.js](src/widget/activity.js)）。 |
 
 两者**都不是**官网规定，也不是用户指定的时长；它们只在这里定义一次，别处不许重写。
 
 ## 颜色是身份，动作是状态
 
 官方那个 lifecycle 演示里，Idle / Working / Waiting / Blocked / Thinking / Done
-**六个标签共用同一个 --gb-ink** —— 切状态时头像颜色一个像素都不变，变的全是动作。
+**六个标签共用同一个 `--gb-ink`** —— 切状态时头像颜色一个像素都不变，变的全是动作。
 颜色回答的是「这是哪只 Bot」，不是「它在干嘛」。
 
 * **颜色 = 项目**（DSH Workspace）。一个项目一个色，与状态无关
@@ -221,23 +256,23 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 
 | 名字 | 墨色 | 原型 |
 | --- | --- | --- |
-| 蓝 | #1084FE | blob（主角） |
-| 紫 | #9159FE | hex |
-| 橙 | #FF9800 | cloud |
-| 粉 | #FF309B | wedge |
-| 橙红 | #FF6700 | pebble |
-| 赭 | #97683D | teardrop |
-| 青 | #00BCA6 | squircle |
-| 红 | #FF263C | tablet |
+| 蓝 | `#1084FE` | blob（主角） |
+| 紫 | `#9159FE` | hex |
+| 橙 | `#FF9800` | cloud |
+| 粉 | `#FF309B` | wedge |
+| 橙红 | `#FF6700` | pebble |
+| 赭 | `#97683D` | teardrop |
+| 青 | `#00BCA6` | squircle |
+| 红 | `#FF263C` | tablet |
 
-* **Buddy** 没设过颜色 → workspaceId 哈希到 8 色之一（FNV-1a，稳定、跨机器一致）
+* **Buddy** 没设过颜色 → workspaceId 哈希到 8 色之一（FNV-1a,稳定、跨机器一致）
 * 设过颜色 → Buddy 用你选的那个
 * 对比度不够时**只调明度、不动色相**
 
 ⚠️ 哈希默认色只属于 **Buddy**（和它的灰色规则）。项目的**文件夹图标**不走这套：
 没设过颜色时文件夹保持 **DSH 原生颜色**，插件不标记、不写变量。见下面「文件夹」一节。
 
-**什么时候是灰的**（src/widget/activity.js）：
+**什么时候是灰的**（[src/widget/activity.js](src/widget/activity.js)）：
 
 | 情况 | 颜色 |
 | --- | --- |
@@ -249,18 +284,27 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 
 「点开看过」按**完成身份**记：选中期间显示项目色，切走之后才变灰。
 
-* 眼睛仍然填状态位背后的实际底色（官方 .eye{fill:var(--bg)}），
-  亮色 / 暗色 / 自定义侧栏色都对得上
+眼睛仍然填状态位背后的实际底色（官方 `.eye{fill:var(--bg)}`），
+亮色 / 暗色 / 自定义侧栏色都对得上。
+
+<p align="center">
+  <img src="./docs/project-colors-light.png" width="820" alt="亮色主题：同一项目跑完整个生命周期颜色不变；四个项目默认色一眼可分">
+</p>
+<p align="center">
+  <img src="./docs/project-colors-dark.png" width="820" alt="深色主题：同一项目跑完整个生命周期颜色不变；四个项目默认色一眼可分">
+</p>
 
 **在哪改**：项目行右侧的「⋯」菜单里，和「重命名 / 删除工作区」并列，多一项「颜色」。
 点开是调色板：8 个官方色块 + 自定义 hex 输入 + 「恢复默认」。
+
+<p align="center">
+  <img src="./docs/project-palette-light.png" width="620" alt="项目行的 ⋯ 菜单 → 颜色 → 调色板（亮色）">
+</p>
 
 未设置颜色时调色板**不假装已选**：没有任何色块被标成当前色，自定义输入框留空并提示
 「未设置（自定义 hex）」—— 只是打开调色板不会写入任何配置。设置过颜色后，对应的色块
 与自定义值才显示为当前选择。「恢复默认」的说明是**「文件夹跟随 DSH，Buddy 使用默认
 项目色。」**，不再把文件夹的默认颜色写成一个固定色值。
-
-<p align="center"><img src="./docs/project-palette-light.png" width="720" alt="项目行的 ⋯ 菜单 → 颜色 → 调色板（亮色）"></p>
 
 改完**立刻**生效：该项目下所有已挂载的头像**和项目行左侧的原生文件夹图标**当场换色，
 不用等轮询、不用刷新。写入失败时头像与文件夹一起回滚并给出可观察提示；
@@ -277,6 +321,11 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 | 选过预设色 / 自定义 hex | 所选项目色，与彩色 Buddy 主体同色 | 所选项目色 |
 | 点了「恢复默认」 | 立刻回到 DSH 原生色，刷新后仍是 | 回到哈希默认项目色 |
 
+<p align="center">
+  <img src="./docs/folder-ink-light.png" width="400" alt="浅色主题：显式选色的项目文件夹与彩色 Buddy 同为项目身份色；未设置的项目保持 DSH 原生灰">
+  <img src="./docs/folder-ink-dark.png" width="400" alt="深色主题：显式选色的项目文件夹与彩色 Buddy 同为项目身份色；未设置的项目保持 DSH 原生灰">
+</p>
+
 「原生色」不是一个固定色值，而是**宿主实时决定**的：普通态、含当前会话时的选中色
 （`folderActive`）、明暗主题、以及宿主以后任何样式变化。恢复方式是**撤销插件的颜色
 覆盖**（摘掉 `data-dsgb-workspace-folder` 与 `--dsgb-workspace-ink`），让宿主 CSS
@@ -290,15 +339,10 @@ stateOf() 返回     { inheritedEventCount, timed, questions: { active, settled 
 
 折叠的、空的、没有活跃会话的项目同样处理（不依赖会话记录）。Buddy 的灰色规则
 （空闲、失活、完成消费后）只作用于头像，不影响文件夹。图标本身仍是 DSH 的原生
-SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是它的 currentColor 指到
+SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是它的 `currentColor` 指到
 项目墨色上；项目标题、箭头、菜单不会被一起染色，也不新增任何圆点或角标。
 
-<p align="center">
-  <img src="./docs/folder-ink-light.png" width="360" alt="浅色主题：显式选色的项目文件夹与彩色 Buddy 同为项目身份色；未设置的项目保持 DSH 原生灰">
-  <img src="./docs/folder-ink-dark.png" width="360" alt="深色主题：显式选色的项目文件夹与彩色 Buddy 同为项目身份色；未设置的项目保持 DSH 原生灰">
-</p>
-
-**持久化**：写在 $DSH_HOME/dsh-grok-buddy/colors.json（默认 ~/.dsh/dsh-grok-buddy/colors.json），
+**持久化**：写在 `$DSH_HOME/dsh-grok-buddy/colors.json`（默认 `~/.dsh/dsh-grok-buddy/colors.json`），
 按 workspaceId 存，顺手记一份目录路径作可读备份。
 
 ```json
@@ -313,7 +357,7 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 ### 动作
 
 六个状态各对一个**动作**（动作名不是状态名）。动作的具体形态与量测过程见
-[docs/motion-spec.md](docs/motion-spec.md)，实现见 `src/grokbot/motion.js`。
+[docs/motion-spec.md](docs/motion-spec.md)，实现见 [src/grokbot/motion.js](src/grokbot/motion.js)。
 
 | 状态 | 动作 | 画的是什么 |
 | --- | --- | --- |
@@ -321,7 +365,7 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 | working | `spin` | 圆头像；进入时甩一下头（眼睛压到侧面再回来），随后持续左右张望；**只在进入后 1.2 s 内**甩出一道多色弧形拖尾，随后缩短淡出 |
 | waiting | `half-lidded` | 圆头像 + 压扁上翘的横线眼（0.175D×0.065D，+12°/+14°），低活动度呼吸 |
 | blocked | `bang` | **头像退出**，主体是感叹号：上方圆头长条（顶宽 0.146D、上宽下窄）+ 下方圆点（0.121D），稳态完全静止 |
-| thinking | `tri-dot` | **头像退出**，三颗横排圆点依次脉动：周期 1.4 s、相位差 1/3；点径/间距按侧栏可读性放大（0.28D / 0.44D，20px 下单点 3.7–4.5 px），详见 [docs/motion-spec.md](docs/motion-spec.md) |
+| thinking | `tri-dot` | **头像退出**，三颗横排圆点依次脉动：周期 1.4 s、相位差 1/3；点径/间距按侧栏可读性放大（0.28D / 0.44D，20px 下单点 3.7–4.5 px） |
 | done | `orbit` | 头像长回来并缓慢转动，6 条不同倾角/方向的彩色轨道环绕，按深度分成头像**身后**与**身前**两层，形成绕行遮挡 |
 
 这四条是硬要求，也是验收时要看的：
@@ -334,21 +378,18 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 颜色仍然只表示项目身份：六态同色。轨道与拖尾是参考动画里明确存在的**特效层**，
 保留多色；头像、感叹号、思考点的基础墨色仍是项目色（思考点的明暗是同一色的透明度）。
 
-**prefers-reduced-motion**：**不启动持续动画**——不是只关掉转头和视线偏移。
+**prefers-reduced-motion**：**不启动持续动画** —— 不是只关掉转头和视线偏移。
 眨眼、转头、轨道旋转、拖尾与 RAF 全部停掉，直接画一帧该状态的**代表性静态姿态**；
 六态的区分靠姿态本身加可访问文案（aria-label 跟着状态更新，中英各一套）。
 系统偏好在运行时变化时会重画静态姿态或恢复动画，**不改变任何业务状态**：
-done 在 reduced-motion 下仍是 done。诊断里的 `animating` 依据引擎真实运行
-状态，而不是「有没有 dispose 函数」。
+done 在 reduced-motion 下仍是 done。
 
 静态姿态也保留六态的可识别性，不会全退回普通圆脸：
 blocked 还是感叹号、thinking 还是三颗点、done 还是头像 + 轨道、working 还是带头像与拖尾。
 
-鼠标悬停能看到具体细节（在读哪个工具、失败代号）。
-
 ### 动态预览与真浏览器核对
 
-`preview.html` 用**产品同一个渲染器**做对照台，不是另写一套演示动画：
+[preview.html](preview.html) 用**产品同一个渲染器**做对照台，不是另写一套演示动画：
 
 * 六态单切 / 并排；64 / 32 / 16 px 三档真实尺寸；
 * 项目色与白色参考模式；深色与浅色背景；
@@ -357,30 +398,45 @@ blocked 还是感叹号、thinking 还是三颗点、done 还是头像 + 轨道�
   不只是 GIF 里的固定顺序；
 * 同态反复送快照但不重播、reduced-motion 开关、done 长时间持续、深浅背景切换。
 
-参考录屏的对应帧放在 `docs/reference-*.png`，与实现并排对照（已裁掉播放按钮、
-六态标签、进度条和鼠标 —— 它们不是头像的一部分）。
+参考录屏的对应帧放在 [docs/reference-*.png](docs/reference-idle.png)，与实现并排对照
+（已裁掉播放按钮、六态标签、进度条和鼠标 —— 它们不是头像的一部分）。
 
-`node scripts/browser-check.mjs` 会起一个真的 Chrome（headless、零依赖 CDP），
-在真实 SVG 上核对图层构成、20px 布局矩形、轨道是否被裁、帧是否真的在推进、
-同态快照是否误重启动画、reduced-motion 是否真的不跑帧，并输出截图。
+```bash
+node scripts/browser-check.mjs    # 真 Chrome 里核对预览页的图层/几何/帧推进
+node scripts/bundle-check.mjs     # 真 Chrome 里跑**构建产物** lib/widget.js
+```
 
-`node scripts/bundle-check.mjs` 更进一步：它在真浏览器里加载**构建产物**
-`lib/widget.js`（不是预览页的同源模块），对着复刻的侧栏 DOM 跑一次
-boot → fetch → 挂载 → 六态渲染，核对六态的图层构成、未知会话的兜底完成、
-真实尺寸布局、真实帧推进与可访问文本。假快照由脚本自己的服务器提供，
-**不写真实 state.json**。
+`browser-check.mjs` 起一个真的 Chrome（headless、零依赖 CDP），在真实 SVG 上核对图层构成、
+20px 布局矩形、轨道是否被裁、帧是否真的在推进、同态快照是否误重启动画、reduced-motion
+是否真的不跑帧，并输出截图。
 
-`node scripts/doc-shots.mjs` 从生产实现截 `docs/states.png` / `docs/faces.png`
-（取稳态帧，不是过渡开始的普通圆脸）。
+`bundle-check.mjs` 更进一步：它在真浏览器里加载**构建产物** `lib/widget.js`
+（不是预览页的同源模块），对着复刻的侧栏 DOM 跑一次 boot → fetch → 挂载 → 六态渲染，
+核对六态的图层构成、未知会话的兜底完成、真实尺寸布局、真实帧推进与可访问文本。
+假快照由脚本自己的服务器提供，**不写真实 state.json**。
+
+```bash
+node scripts/doc-shots.mjs                       # docs/states.png、states-64/20.png、faces.png
+node scripts/doc-size-compare.mjs                # docs/size-compare.png（16px vs 20px）
+node scripts/doc-motion-gif.mjs                  # docs/effect.gif（逐帧抓真动画）
+node scripts/doc-shot.mjs <页> <图> [选择器]       # 通用：重截任意 docs 页
+node scripts/doc-shot.mjs docs/hero.html docs/hero.png --width=980 --height=620
+node scripts/doc-shot.mjs 'docs/project-colors.html?palette=1' docs/project-palette-light.png \
+  --width=900 --height=640 --post=1800 --include=.dsgb-palette
+```
+
+所有 README 配图都能在仓库里**重跑出来**，截的是产品同一个渲染器，不是另画的示意图。
+`docs/project-colors.html` 是一个**截图台**：它伪造宿主那两份 JSON（state.json / colors.json），
+其余全走真实的 `lib/widget.js`，所以图里的头像、文件夹着色、调色板都是产品代码画的。
 
 ## 界面适配：不是只有侧栏那一种行
 
-DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 [data-row-key^="session:"]：
+DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 `[data-row-key^="session:"]`：
 
 | 表面 | 结构 | 身份来源 | 本插件 |
 | --- | --- | --- | --- |
-| 侧栏会话行 | div[data-row-key="session:<id>"][role=treeitem] | `data-row-key` | **支持**（含 HoverCard 包装、嵌套 groupSection、虚拟列表复用） |
-| 搜索结果行 | div[role=treeitem]，**无 data-row-key** | 只有标题文本 | **不猜身份**，记 `unidentifiableSearch` |
+| 侧栏会话行 | `div[data-row-key="session:<id>"][role=treeitem]` | `data-row-key` | **支持**（含 HoverCard 包装、嵌套 groupSection、虚拟列表复用） |
+| 搜索结果行 | `div[role=treeitem]`，**无 data-row-key** | 只有标题文本 | **不猜身份**，记 `unidentifiableSearch` |
 | 悬停卡片 | HoverCard 用 `createPortal` 挂到 body；正文由 `renderSlot("sidebar.session.row.hover", { sessionId })` 渲染 | sessionId 是 **React 参数**，不进 DOM | **不挂头像**（卡片自身已显示标题与状态行） |
 
 搜索行的 16px 槽位是嵌套结构（`searchResultHeading > slot`），**不是**「首个窄于
@@ -390,7 +446,7 @@ DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 [data-
 要覆盖这两种表面，需要一个**公开的稳定身份入口**，二选一：
 
 1. 在搜索结果行上暴露 `data-row-key="session:<id>"`（最小改动，本插件已能自动识别，
-   见 `test/surface-adapters.test.mjs` 的 S8）；或
+   见 [test/surface-adapters.test.mjs](test/surface-adapters.test.mjs) 的 S8）；或
 2. 提供 `sidebar.workspaces.search.result.leading` 之类的 leading 槽位。
 
 这两条都需要宿主改动，或用 `dsh.client` 模块 + `ctx.slots` 注册（本插件当前走
@@ -402,29 +458,31 @@ head 注入，不是 client 模块）。本插件不修改安装包、不依赖 
 
 ## 安装
 
-```text
-安装 dsh-grok-buddy 插件到我的 DSH profile（没说的话先问我用哪个 profile）。
-
-步骤：
-1. 加依赖：dsh plugin --profile <PROFILE> add github:devzer0o0/dsh-grok-buddy
-2. 确认 node_modules/dsh-grok-buddy 里有 lib/index.js 和 lib/widget.js；
-   缺了就在插件目录跑一次 npm run build，再重新装。
-3. 确认 profile 的 package.json 里 dsh.profile.bundles 包含 dsh-grok-buddy。
-4. 不要启动 profile，装完验证即可。
+```bash
+dsh plugin --profile <PROFILE> add github:devzer0o0/dsh-grok-buddy
 ```
+
+装完确认三件事：
+
+1. `node_modules/dsh-grok-buddy` 里有 `lib/index.js` 和 `lib/widget.js`；
+   缺了就在插件目录跑一次 `npm run build`（或 `node scripts/build.mjs`），再重新装。
+2. profile 的 `package.json` 里 `dsh.profile.bundles` 包含 `dsh-grok-buddy`。
+3. **重启宿主**（见下一节 —— 只刷新页面不会加载宿主侧改动）。
+
+插件清单在 [cordis.patch.yml](cordis.patch.yml)（`package.json` 的 `dsh.bundle.patch` 指向它）。
 
 ## 刷新、重启与验收（三件事不一样）
 
 | 动作 | 生效范围 | 说明 |
 | --- | --- | --- |
-| **重新加载 renderer 页面** | 只换**页面脚本** | lib/widget.js 是每次请求现读磁盘的，页面脚本改完刷新就生效；**不**加载宿主侧改动 |
-| **重启宿主** | 宿主侧 lib/index.js、lib/derive.js、lib/fold.js、lib/probe.js、路由 | 事件处理、状态折叠、HTTP 路由的改动**必须**重启宿主才生效 |
-| **重新安装插件文件** | 磁盘上的包 | profile 里的 node_modules 是拷贝不是软链；改源码要重新装或手动同步，**再**重启宿主 |
+| **重新加载 renderer 页面** | 只换**页面脚本** | `lib/widget.js` 是每次请求现读磁盘的，页面脚本改完刷新就生效；**不**加载宿主侧改动 |
+| **重启宿主** | 宿主侧 `lib/index.js`、`lib/derive.js`、`lib/fold.js`、`lib/probe.js`、路由 | 事件处理、状态折叠、HTTP 路由的改动**必须**重启宿主才生效 |
+| **重新安装插件文件** | 磁盘上的包 | profile 里的 `node_modules` 是拷贝不是软链；改源码要重新装或手动同步，**再**重启宿主 |
 
 **判据（不要只看版本字符串）**：
 
-1. `curl -s <host>/dsh-grok-buddy/widget.js | md5` 与工作区 lib/widget.js 一致 → 页面脚本层已更新
-2. `curl -s <host>/dsh-grok-buddy/state.json` 里每行**有 reason 与 completionKey 字段** → 宿主层已加载新版
+1. `curl -s <host>/dsh-grok-buddy/widget.js | md5` 与工作区 `lib/widget.js` 一致 → 页面脚本层已更新
+2. `curl -s <host>/dsh-grok-buddy/state.json` 里每行**有 `reason` 与 `completionKey` 字段** → 宿主层已加载新版
 3. 页面里 `__dshGrokBuddy.version` 与构建标识一致 → 页内实例是新的
 
 第 2 条不过，说明宿主还没重启 —— 此时页面即使刷了小版本也拿不到新语义。
@@ -455,20 +513,24 @@ curl -s -X POST -H 'Content-Type: application/json' \
 display / visibility / opacity、动画是否在跑、aria-label。
 
 **不会**上传会话标题、正文、工具参数、路径或凭据（服务端还有一层白名单兜底）。
-GET 返回 200 但 probe 为 null **不算**链路通 —— 那表示没开窗口或没有样本。
+GET 返回 200 但 `probe` 为 null **不算**链路通 —— 那表示没开窗口或没有样本。
 
 ## 工作原理
 
-宿主半侧（lib/index.js）：
+宿主半侧（[lib/index.js](lib/index.js)）：
 
-* 订阅 session/event：turn/step 边界、tool/call、tool/result、approval/asked、
+* 订阅 `session/event`：turn/step 边界、tool/call、tool/result、approval/asked、
   llm/retry、turn/end、标题与工作目录
-* 订阅 agent/assistant-stream：只看有没有开始吐字
-* 订阅 agent/status 与 agent/error：agent 是否在跑、有没有崩
-* 读 sessionProjections 的 userQuestions：挂起的提问与计划评审
-* lib/fold.js 把这些折成**事实**（不产出状态名）
-* src/decision.js 用事实 + 展示输入算出**六态**（唯一决策表）
-* 暴露 GET /dsh-grok-buddy/state.json，并在页面 head 注入 /dsh-grok-buddy/widget.js
+* 订阅 `agent/assistant-stream`：只看有没有开始吐字
+* 订阅 `agent/status` 与 `agent/error`：agent 是否在跑、有没有崩
+* 读 `sessionProjections` 的 userQuestions：挂起的提问与计划评审
+* [lib/fold.js](lib/fold.js) 把这些折成**事实**（不产出状态名）
+* [src/decision.js](src/decision.js) 用事实 + 展示输入算出**六态**（唯一决策表）
+* 暴露 `GET /dsh-grok-buddy/state.json`，并在页面 head 注入 `/dsh-grok-buddy/widget.js`
+* 暴露 `GET/POST /dsh-grok-buddy/colors.json`、`probe.json`、`probe-control.json`
+
+注入走两条路：`webserver/index-inject` 结构化注入行（桌面版唯一受支持的方式），
+外加 `webServer.tapIndex` 兜底（Host 自己渲染 index.html 时）。
 
 ### 「任务级错误停止」的真实来源
 
@@ -502,19 +564,15 @@ flush 失败），所以它只写「暂定停止」，等上面的生命周期�
 thinking。
 
 页面不再「看见 blocked 就画出感叹号」：快照里带 `stopCertain / stopCause / stopSource /
-stopCode / stopTurnKey`。校验只有一处实现（`src/decision.js` 的 `stopProofOf()`，宿主与
-页面共用）：确证来源、明确 `cause=error`、身份非空且等于当前轮、且不被成功/非错误终态
-取代 —— 缺任何一条都降级为 idle 并保留诊断原因。
+stopCode / stopTurnKey`。校验只有一处实现（[src/decision.js](src/decision.js) 的
+`stopProofOf()`，宿主与页面共用）：确证来源、明确 `cause=error`、身份非空且等于当前轮、
+且不被成功/非错误终态取代 —— 缺任何一条都降级为 idle 并保留诊断原因。
 
 **封账规则**：任何终局（成功 / 错误 / 取消 / 拒绝）落定后，这一轮不再接受任何同轮事件
 （迟到终局、错误、流分片、工具调用都不行），唯一出口是下一轮 `turn/start`。停止事实也
 不会随普通缓存 TTL 被回收 —— 它只能被真实恢复、新任务或权威会话删除替代。
-* 暴露 GET/POST /dsh-grok-buddy/colors.json、probe.json、probe-control.json
 
-注入走两条路：webserver/index-inject 结构化注入行（桌面版唯一受支持的方式），
-外加 webServer.tapIndex 兜底（Host 自己渲染 index.html 时）。
-
-页面半侧（src/widget/ → 构建成 lib/widget.js）：
+页面半侧（[src/widget/](src/widget/) → 构建成 `lib/widget.js`）：
 
 * 轮询 state.json，在侧栏会话行的前导位里放一只头像（`BOT_SIZE`，现为 20px）
 * 状态位改成**按内容撑开**（只剩头像时就是 20px 宽）：DSH 会往同一格再塞自己的标记
@@ -522,14 +580,15 @@ stopCode / stopTurnKey`。校验只有一处实现（`src/decision.js` 的 `stop
 * 头像实例按 DOM 槽位索引；同一槽位被复用于另一个会话时**重新绑定身份**
 * 节点离开 DOM 后动画会停，挂回来时重新起循环（不是留守静止 SVG）
 * 眼睛的底色**从状态位背后量**，主题一变就重刷
-* 项目归属：向上找最近的 .groupSection 再取项目行 key
+* 项目归属：向上找最近的 `.groupSection` 再取项目行 key
 
-  ⚠️ **不能用 `:scope >` 直接取项目行**。DSH 的 HoverCard 把每一行都包进一层
-  span.hc-root，项目行不是分区的直接子节点 —— `:scope >` 会返回 0 个，
-  所有会话都掉进「未分组」。现在的做法是在分区内找项目行，再用「最近的
-  .groupSection 是不是我自己」排除嵌套分区里的那些。
+> ⚠️ **不能用 `:scope >` 直接取项目行**。DSH 的 HoverCard 把每一行都包进一层
+> `span.hc-root`，项目行不是分区的直接子节点 —— `:scope >` 会返回 0 个，所有会话都会
+> 掉进「未分组」。现在的做法是在分区内找项目行，再用「最近的 `.groupSection` 是不是
+> 我自己」排除嵌套分区里的那些。
+
 * 改色入口：项目行「⋯」菜单是 DSH 前端硬编码的，没有开放 slot，所以在菜单容器
-  [data-menu-material] 里补一项「颜色」。容器会复用，所以归属在**点击那一刻**重新算
+  `[data-menu-material]` 里补一项「颜色」。容器会复用，所以归属在**点击那一刻**重新算
 * 项目行**不放**任何额外装饰：文件夹前面只留 DSH 自己的图标。文件夹图标只在
   项目**显式设过颜色**时按项目身份色着色（复用 currentColor + 插件 CSS 变量，
   只改 color，不改布局）；没设过时保持宿主原生色，插件不碰这一格
@@ -544,14 +603,18 @@ node scripts/build.mjs            # src/ → lib/widget.js（单文件 IIFE）
 node --test "test/*.test.mjs"     # 单元 / 决策 / 路由 / 构建产物集成测试
 ```
 
+`lib/widget.js` 是**入库的构建产物**。改了 `src/` 却没重新构建，CI 会红
+（[.github/workflows/npm-publish.yml](.github/workflows/npm-publish.yml) 里有一条
+`git diff --exit-code -- lib/widget.js`）。
+
 测试分三层：
 
-* test/decision.test.mjs、test/derive.test.mjs：六态判定与事件身份
-* test/probe-route.test.mjs、test/colors-route.test.mjs：真实 HTTP 路由
-* test/widget-integration.test.mjs：**把构建产物真的跑起来**（boot / fetch / sync /
-  mount / 动画 / observer / dispose），不是复制一份实现重测
+* [test/decision.test.mjs](test/decision.test.mjs)、[test/derive.test.mjs](test/derive.test.mjs)：六态判定与事件身份
+* [test/probe-route.test.mjs](test/probe-route.test.mjs)、[test/colors-route.test.mjs](test/colors-route.test.mjs)：真实 HTTP 路由
+* [test/widget-integration.test.mjs](test/widget-integration.test.mjs)：**把构建产物真的跑起来**
+  （boot / fetch / sync / mount / 动画 / observer / dispose），不是复制一份实现重测
 
-preview.html 与 docs/*.html 跑的都是构建产物本身，不依赖 DSH。
+`preview.html` 与 `docs/*.html` 跑的都是构建产物本身，不依赖 DSH。
 
 ## 未完成与已知边界
 
@@ -560,14 +623,11 @@ preview.html 与 docs/*.html 跑的都是构建产物本身，不依赖 DSH。
 * **搜索结果行**：当前 DSH 的 `SearchResultItem` 只渲染 `role/aria-selected`，
   不写 `data-row-key`；16px 槽位嵌在 `searchResultHeading > slot` 里。
   本插件如实记账（`unidentifiableSearch`）但不挂头像。
-  最小公开契约是两种之一：搜索结果行暴露 `data-row-key="session:<id>"`
-  （本插件已能自动识别），或提供 leading 槽位。
 * **悬停卡片**：`HoverCard` 用 `createPortal` 挂到 `document.body`，
   `sessionId` 只是 `renderSlot("sidebar.session.row.hover", { sessionId })` 的
   React 参数，不进 DOM。不挂独立头像（卡片自身已显示标题与状态行）。
 * 上述两条都可用 `dsh.client` 模块 + `ctx.slots` 注册解决，但本插件当前走
-  head 注入架构，不是 client 模块。改造它超出「修复六态」的范围，
-  也**不修改安装包**来绕过。
+  head 注入架构，不是 client 模块。
 
 **证据边界（不要过度解读）**
 

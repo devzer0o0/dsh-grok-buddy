@@ -59,13 +59,34 @@ jobs:
       - name: Inspect npm package contents
         run: npm pack --dry-run
 
+  # 没有配置 NPM_TOKEN 时（例如 fork、或还没接 npm 账号），发布这一步整体跳过。
+  # 否则每次合并到 main 都会因为 NODE_AUTH_TOKEN 为空而红，把真正的失败埋掉。
+  has-token:
+    name: Check npm token
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -n "${NPM_TOKEN}" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN 未配置，跳过 npm 发布（质量检查照常执行）。"
+          fi
+
   publish:
     name: Publish to npm
-    needs: quality
+    needs: [quality, has-token]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      needs.has-token.outputs.present == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     permissions:
       contents: read
