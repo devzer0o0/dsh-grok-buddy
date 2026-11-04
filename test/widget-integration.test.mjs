@@ -22,6 +22,7 @@ import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { Doc, El, jsonResponse } from './dom-harness.mjs'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
+import { BOT_SIZE } from '../src/widget/styles.js'
 import { defaultInk, storeKey } from '../src/palette.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -328,7 +329,7 @@ function phaseRow(id, phase, extra) {
   return base
 }
 
-test('构建产物能真的 boot 起来，并把头像挂进 16px 前导位', async () => {
+test('构建产物能真的 boot 起来，并把头像挂进前导位', async () => {
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')
   const { slot } = makeRow(h.doc, section, 's1', false)
@@ -336,7 +337,8 @@ test('构建产物能真的 boot 起来，并把头像挂进 16px 前导位', as
   await h.tick(600)
   const bot = botOf(slot)
   assert.ok(bot !== undefined, '头像应该挂进前导位')
-  assert.equal(bot.getAttribute('width'), '16')
+  // 尺寸取自 styles.js 的 BOT_SIZE：比原生 16px 状态点大，侧栏里才认得出。
+  assert.equal(bot.getAttribute('width'), String(BOT_SIZE))
   assert.equal(bot.getAttribute('data-dsgb-phase'), 'thinking')
   assert.equal(slot.getAttribute('data-dsgb-slot'), '1')
   h.api.stop()

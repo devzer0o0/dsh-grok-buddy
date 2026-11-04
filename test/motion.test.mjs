@@ -25,6 +25,7 @@ import {
 } from '../src/grokbot/motion.js'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
 import { RUNTIME_PHASES } from '../src/decision.js'
+import { BOT_SIZE } from '../src/widget/styles.js'
 
 const D = 210
 
@@ -488,7 +489,7 @@ test('D2 静态帧与动态帧的图形构成一致（不会静态时换一套�
 
 // ── E. 16px 下的安全边界 ──────────────────────────────────────────────────
 
-test('E1 所有可见图形都在 1.5× 画布内（16px 下不会被裁掉）', () => {
+test('E1 所有可见图形都在 1.5× 画布内（侧栏尺寸下不会被裁掉）', () => {
   const half = 210 * 0.75
   const check = (x, y, label) => {
     assert.ok(Math.abs(x - BOT_CENTER) <= half, label + ' 的 x 越界：' + (x - BOT_CENTER).toFixed(1))
@@ -510,16 +511,17 @@ test('E1 所有可见图形都在 1.5× 画布内（16px 下不会被裁掉）',
   assert.ok(MOTION_SPEC.bang.barTop * D > -half && MOTION_SPEC.bang.dotY * D < half, '感叹号落在画布内')
 })
 
-test('E2 16px 下每个图形仍有足够像素（不是糊成一点）', () => {
-  const pxPerUnit = 16 / (210 * 1.5)
+test('E2 侧栏尺寸下每个图形仍有足够像素（不是糊成一点）', () => {
+  // 与 src/widget/styles.js 的 BOT_SIZE 同源：真实挂出去的尺寸才是验收尺寸。
+  const pxPerUnit = BOT_SIZE / (210 * 1.5)
   const dotPx = MOTION_SPEC.triDot.diamond * D * pxPerUnit
   const bangBarPx = MOTION_SPEC.bang.barTopWidth * D * pxPerUnit
   const orbitPx = MOTION_SPEC.orbit.width * D * pxPerUnit
   // 旧门槛 1.5px 就是「点还在，但侧栏里看不出是三颗」的现状。思考点的验收
   // 改成小尺寸可读性目标：稳态单点 ≥2.9 CSS px（见 E6 的完整几何检查）。
-  assert.ok(dotPx >= 2.9, '16px 下思考点直径应 ≥2.9px（侧栏可辨识），实测 ' + dotPx.toFixed(2))
-  assert.ok(bangBarPx >= 1.5, '16px 下感叹号竖条宽度应 ≥1.5px，实测 ' + bangBarPx.toFixed(2))
-  assert.ok(orbitPx >= 0.7, '16px 下轨道线宽应 ≥0.7px，实测 ' + orbitPx.toFixed(2))
+  assert.ok(dotPx >= 2.9, '思考点直径应 ≥2.9px（侧栏可辨识），实测 ' + dotPx.toFixed(2))
+  assert.ok(bangBarPx >= 1.5, '感叹号竖条宽度应 ≥1.5px，实测 ' + bangBarPx.toFixed(2))
+  assert.ok(orbitPx >= 0.7, '轨道线宽应 ≥0.7px，实测 ' + orbitPx.toFixed(2))
 })
 
 test('E3 胶囊眼环是闭合且对称的（等待态不是随手画的直线）', () => {
@@ -543,8 +545,10 @@ test('E5 拖尾紧贴身体边缘掠过（不是飘在远处的一根线）', ()
 
 // ── F. thinking 三点的小尺寸可读性 ────────────────────────────────────────
 
-/** 16px 图标下 1 身体单位 = 多少 CSS px（viewBox 315 映射到 16px）。 */
-const PX_PER_UNIT = 16 / (210 * 1.5)
+/** 真实图标尺寸下 1 身体单位 = 多少 CSS px（viewBox 315 映射到 BOT_SIZE）。 */
+const PX_PER_UNIT = BOT_SIZE / (210 * 1.5)
+/** 相对 16px 基准的放大倍数：几何门槛随之等比缩放，不再写死 16px 的绝对像素。 */
+const SCALE = BOT_SIZE / 16
 const toPx = (units) => units * PX_PER_UNIT
 /** 画布 315 身体单位，身体中心在正中；INSET 把身体坐标搬到画布坐标。 */
 const VIEWBOX_UNITS = 210 * 1.5
@@ -600,12 +604,12 @@ test('F1 thinking 稳态一个完整脉动周期：三点清楚、分离、不�
     // 三颗点必须全部落在 16px 画布里（含描边外沿，这里按半径算）
     assert.ok(g.left >= 0 && g.right <= canvas, 't=' + t + ' 三点水平越界：' + g.left.toFixed(2) + '..' + g.right.toFixed(2))
     assert.ok(g.top >= 0 && g.bottom <= canvas, 't=' + t + ' 三点垂直越界：' + g.top.toFixed(2) + '..' + g.bottom.toFixed(2))
-    assert.ok(Math.abs((g.left + g.right) / 2 - canvasPx(BOT_CENTER)) < 0.35, 't=' + t + ' 三点应保持居中（漂移只上下）')
+    assert.ok(Math.abs((g.left + g.right) / 2 - canvasPx(BOT_CENTER)) < 0.35 * SCALE, 't=' + t + ' 三点应保持居中（漂移只上下）')
   }
-  assert.ok(thinnest >= 2.9, '稳态单点直径应 ≥2.9 CSS px，实测最小 ' + thinnest.toFixed(2))
-  assert.ok(fattest <= 3.7, '脉动峰值不要让点胀到糊在一起，实测最大 ' + fattest.toFixed(2))
-  assert.ok(widest >= 12.0 && widest <= 13.0, '三点整体宽度应约 12.5 CSS px，实测 ' + widest.toFixed(2))
-  assert.ok(tightest >= 1.0, '相邻两点的边缘缝应 ≥1 CSS px（不粘连），实测最小 ' + tightest.toFixed(2))
+  assert.ok(thinnest >= 2.9 * SCALE, '稳态单点直径应 ≥' + (2.9 * SCALE).toFixed(2) + ' CSS px，实测最小 ' + thinnest.toFixed(2))
+  assert.ok(fattest <= 3.7 * SCALE, '脉动峰值不要让点胀到糊在一起，实测最大 ' + fattest.toFixed(2))
+  assert.ok(widest >= 12.0 * SCALE && widest <= 13.0 * SCALE, '三点整体宽度应约 ' + (12.5 * SCALE).toFixed(1) + ' CSS px，实测 ' + widest.toFixed(2))
+  assert.ok(tightest >= 1.0 * SCALE, '相邻两点的边缘缝应 ≥' + (1.0 * SCALE).toFixed(2) + ' CSS px（不粘连），实测最小 ' + tightest.toFixed(2))
   assert.ok(dimmest >= 0.7, '稳态最暗的点也要 ≥0.7 透明度（否则小尺寸下会消失），实测 ' + dimmest.toFixed(2))
   assert.ok(widest < halfCanvas * 2, '三点整体不能撑出画布')
 })
@@ -674,8 +678,8 @@ test('F3 reduced-motion 的静态三点沿用调整后的点径与间距', () =>
   assert.ok(s.maxDiameter <= specMaxPx + 0.01, '静态最大点径 ' + s.maxDiameter.toFixed(2) + ' 大于脉动峰值 ' + specMaxPx.toFixed(2))
   assert.ok(s.maxDiameter > s.minDiameter, '静态中间那颗应更大，保留脉动的层次')
   void d
-  assert.ok(s.minGap >= 1.0, '静态三点边缘缝应 ≥1 CSS px，实测 ' + s.minGap.toFixed(2))
-  assert.ok(s.width >= 12.0 && s.width <= 13.0, '静态三点整体宽度应约 12.5 CSS px，实测 ' + s.width.toFixed(2))
+  assert.ok(s.minGap >= 1.0 * SCALE, '静态三点边缘缝应 ≥' + (1.0 * SCALE).toFixed(2) + ' CSS px，实测 ' + s.minGap.toFixed(2))
+  assert.ok(s.width >= 12.0 * SCALE && s.width <= 13.0 * SCALE, '静态三点整体宽度应约 ' + (12.5 * SCALE).toFixed(1) + ' CSS px，实测 ' + s.width.toFixed(2))
   for (const alpha of s.alphas) {
     assert.ok(alpha >= spec.alphaMin - 0.001 && alpha <= spec.alphaMax + 0.001, '静态透明度应取自动态区间，实测 ' + alpha)
   }

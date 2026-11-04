@@ -7,18 +7,19 @@
  *
  * 所以这里钉死三件事：
  *   1. 格子按内容撑开（width:auto），不再是定宽 16px —— 溢出从这里来
- *   2. 头像 ≡ 原生格子尺寸（16px），只挂头像的行与原布局逐像素一致
+ *   2. 头像尺寸取自 BOT_SIZE（20px：等于宿主前导位高度，侧栏里能认出感叹号/三点）
  *   3. 头像排最前（DOM 顺序 + order:-1 兜底），和原生状态点同位
  *
  * @module test/widget-styles.test
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CELL_GAP, slotStyles } from '../src/widget/styles.js'
+import { BOT_SIZE, CELL_GAP, slotStyles } from '../src/widget/styles.js'
 
 const BOT = 'dsgb-bot'
 const ATTR = 'data-dsgb-slot'
-const SIZE = 16
+// 生成样式时使用的尺寸就是插件真正挂出去的尺寸，测试必须跟它同源。
+const SIZE = BOT_SIZE
 const css = slotStyles(BOT, ATTR, SIZE)
 
 /** 取某条规则（选择器 → 声明块）。 */
@@ -32,8 +33,8 @@ function ruleOf(selector) {
 test('前导位按内容撑开，不再定宽 —— 多出的标记不会溢出压标题', () => {
   const cell = ruleOf('[' + ATTR + '][' + ATTR + ']')
   assert.match(cell, /width:auto/, '格子必须 width:auto，否则第二只标记溢出')
-  assert.doesNotMatch(cell, /[^-]width:16px/, '不能再把格子钉回 16px')
-  assert.match(cell, /min-width:16px/, '只剩头像时要保持原生 16px 宽')
+  assert.doesNotMatch(cell, /[^-]width:16px/, '不能再把格子钉回定宽')
+  assert.match(cell, new RegExp('min-width:' + SIZE + 'px'), '只剩头像时要保持头像的宽度')
   assert.match(cell, /display:inline-flex/)
   assert.match(cell, /flex:none/, '格子本身不能被行里的 flex 拉伸')
 })
@@ -43,11 +44,14 @@ test('格子里并排的标记之间留缝，谁都不贴谁', () => {
   assert.match(ruleOf('[' + ATTR + '][' + ATTR + ']'), new RegExp('gap:' + CELL_GAP + 'px'))
 })
 
-test('头像与原生状态点同尺寸（16px），不撑大行', () => {
+test('头像尺寸取自 BOT_SIZE，且比原生 16px 状态点更大（可辨认）', () => {
   const bot = ruleOf('[' + ATTR + '][' + ATTR + '] > .' + BOT)
-  assert.match(bot, /width:16px/)
-  assert.match(bot, /height:16px/)
+  assert.match(bot, new RegExp('width:' + SIZE + 'px'))
+  assert.match(bot, new RegExp('height:' + SIZE + 'px'))
   assert.match(bot, /flex:none/)
+  assert.ok(SIZE > 16, '16px 在侧栏里看不清，头像必须比原生状态点大')
+  // 宿主前导位高度 20px、会话行高 32px：不超过这两者就不会撑破布局。
+  assert.ok(SIZE <= 20, '不能超过宿主前导位高度（20px），否则行会被撑高')
 })
 
 test('头像永远排在前导位最前面，和原生状态点同位', () => {

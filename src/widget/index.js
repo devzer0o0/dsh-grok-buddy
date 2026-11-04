@@ -27,7 +27,7 @@ import { dshRawStateOf, fallbackPhase, mergePhase } from './dsh-state.js'
 import { COOLDOWN_MS, isActive, inkForRow } from './activity.js'
 import { freshMemory, resolveMotion } from './celebrate.js'
 import { CONFIRMED_STOP_SOURCES, DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '../decision.js'
-import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
+import { BOT_SIZE, folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
 const BUILD = '2026-11-04-blocked-ledger'
@@ -51,8 +51,7 @@ const FOLDER_ATTR = 'data-dsgb-workspace-folder'
 const FOLDER_INK_VAR = '--dsgb-workspace-ink'
 /** 项目行 ⋯ 菜单的容器（DSH 的 Menu 用 portal 挂到 body）。 */
 const MENU_SURFACE = '[data-menu-material]'
-/** 头像边长：与 DSH 原生 16px 前导位逐像素对齐。 */
-const BOT_SIZE = 16
+/** 头像边长：取自 styles.js 的单一定义（当前 20px，等于宿主前导位高度）。 */
 /**
  * 动作 → 图形构成（诊断与文档共用）。
  *

@@ -82,12 +82,13 @@
   </div>
 </div>
 
-<h2>三档真实尺寸（16px 才是验收主体）</h2>
+<h2>四档真实尺寸（20px 是侧栏里的验收主体）</h2>
 <div class="panel">
   <div class="row" id="sizes"></div>
   <p class="hint">
-    64px 看轨迹与层次，32px 看缩放是否合理，16px 看侧栏里到底认不认得出来。
-    画布是 1.5× 身体直径，轨道收在里面，所以 16px 下不会被格子裁掉。
+    64px 看轨迹与层次，32px 看缩放是否合理，20px 是侧栏里真正挂出去的尺寸，
+    16px 留作对照（原生状态点尺寸，感叹号与三点在这里确实偏小）。
+    画布是 1.5× 身体直径，轨道收在里面，所以 20px 下也不会被格子裁掉。
   </p>
 </div>
 
@@ -248,7 +249,8 @@ function rebuild() {
 
   // 三档尺寸
   sizesRow.textContent = ''
-  for (const size of [64, 32, 16]) {
+  // 20 才是侧栏里的真实尺寸（BOT_SIZE）；16 留着对照原生状态点，看清放大前后的差别。
+  for (const size of [64, 32, 20, 16]) {
     const cell = document.createElement('div')
     cell.className = 'cell'
     const box = document.createElement('div')

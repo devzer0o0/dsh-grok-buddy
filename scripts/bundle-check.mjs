@@ -26,6 +26,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { BOT_SIZE } from '../src/widget/styles.js'
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
 const idx = process.argv.indexOf('--out')
@@ -420,7 +422,7 @@ async function main() {
     })()`)
     record('未知会话的 DOM done 也进入完成动作', ghost !== null && ghost.motion === 'orbit', ghost)
 
-    // 16px 布局：不撑破格子
+    // 侧栏真实尺寸布局：不撑破格子
     const layout = await evaluate(`(() => {
       const svg = document.querySelector('[data-row-key="session:p-done"] svg.dsgb')
       const slot = svg.parentElement
@@ -428,7 +430,11 @@ async function main() {
       const b = slot.getBoundingClientRect()
       return { svg: { w: a.width, h: a.height }, slot: { w: b.width, h: b.height } }
     })()`)
-    record('16px 下头像就是 16×16、不撑破格子', Math.abs(layout.svg.w - 16) < 0.5 && Math.abs(layout.svg.h - 16) < 0.5, layout)
+    record(
+      '头像就是 ' + BOT_SIZE + '×' + BOT_SIZE + '、不撑破格子',
+      Math.abs(layout.svg.w - BOT_SIZE) < 0.5 && Math.abs(layout.svg.h - BOT_SIZE) < 0.5,
+      layout,
+    )
 
     // 真实帧推进 + 同态快照不重播
     const motion = await evaluate(`(async () => {
