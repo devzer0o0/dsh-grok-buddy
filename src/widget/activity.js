@@ -6,7 +6,7 @@
  *
  * 三档：
  *   - **选中**：项目色（哪怕它是空闲）
- *   - **活跃**：项目色 —— 在跑、等你、被挡住、刚完成还没被看过
+ *   - **活跃**：项目色 —— 在跑、等你、已确认错误停止（还没被新一轮取代）、刚完成还没被看过
  *   - **不活跃**：灰色 —— idle，或完成展示已结束/已被消费
  *
  * @module dsh-grok-buddy/activity
@@ -23,7 +23,7 @@ export const DORMANT_INK = Object.freeze({
   dark: '#9a9a9a',
 })
 
-/** 这些状态本身就是「正在发生」，永远是活跃的。 */
+/** 这些状态都还值得看着（blocked = 已确认的错误停止，在恢复前一直是当前任务）。 */
 const LIVE_PHASES = new Set(['thinking', 'working', 'waiting', 'blocked'])
 
 /**

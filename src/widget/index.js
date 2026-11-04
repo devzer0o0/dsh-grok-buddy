@@ -30,7 +30,7 @@ import { DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '.
 import { folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04-folder-native-default'
+const BUILD = '2026-11-04-blocked-ledger'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
@@ -440,12 +440,18 @@ function boot() {
      * 旧宿主只会给一个 phase='blocked'（或更旧的 retry/error 名称），没有
      * stopCertain 这类证据字段。那种快照不能冒充「已确认的错误停止」——
      * 证据不足就降级为 idle，并把原因留在 reason 里供诊断。
+     *
+     * 身份必须**非空且严格相等**：空串不算「同一轮」，否则旧宿主/旧缓存里
+     * 缺字段的快照又能混成「已确认的停止」。
      */
     const blockedCertain =
       rawPhase === 'blocked' &&
       entry !== undefined &&
       entry.stopCertain === true &&
-      (entry.stopTurnKey === '' || entry.turnKey === '' || entry.stopTurnKey === entry.turnKey)
+      typeof entry.stopTurnKey === 'string' &&
+      entry.stopTurnKey !== '' &&
+      typeof entry.turnKey === 'string' &&
+      entry.stopTurnKey === entry.turnKey
     // 原生 done 由 DOM 适配层单独读，这里先占位（多表面时取「任一表面说过 done」）
     const nativeDone = nativeDoneSessions.has(sessionId) === true
     const hostPhase = rawPhase

@@ -475,9 +475,17 @@ GET 返回 200 但 probe 为 null **不算**链路通 —— 那表示没开窗�
 | 来源 | 真实事实 | 为什么可信 |
 | --- | --- | --- |
 | `turn/end` reason.error | `TurnEndReasonMap.error = { kind:'error'; error: LlmFailure }` | 执行器把这一轮**记录为**错误终态：会话日志里它就是这一轮的结局 |
-| `turn/end` reason.blocked | `TurnEndReasonMap.blocked`（preStep 被 reject） | 这一轮不可能再继续 |
-| `agent/error` + 系统原因 `turn/end` | `reason.kind='aborted'` 且 `reason.reason.kind` ∈ {parent, hook, legacy} | 宿主先报错、随后以**非用户**原因中断；用户取消（`kind:'user'`）被明确排除 |
 | `agent/error` + `agent/status=idle` | 执行器停稳，且这一轮没有留下 `turn/end` | 覆盖「启动阶段致命失败」：真实链条是 turn/start → throwError(agent/error) → finally 里 turn/end 写入失败 → 走到这里 |
+
+这两条都要求 `agent/error` 自带执行身份（`turn`）：宿主 `throwError` 发的载荷总是
+`{ turn, step, error }`，缺 turn 的错误只能是别的插件/观察链路的诊断，绑定不到当前任务。
+
+明确**不算**错误停止的两种终局：
+
+- `turn/end` reason.blocked 是 **preStep 决策拒绝**（`decision.kind === 'reject'`），宿主
+  不附 error —— 这一轮没有继续，但停的原因不是错误，显示 idle；
+- `aborted`（user / parent / hook / disposed / legacy）是**取消**。即使之前收到过
+  `agent/error`，也不猜测因果 —— 取消终局权威，显示 idle。
 
 **单独一条 `agent/error` 不算停止**：其它插件也用这个事件汇报非致命问题（例如持久化
 flush 失败），所以它只写「暂定停止」，等上面的生命周期事实确认后才升级成 blocked。

@@ -152,16 +152,31 @@ async function main() {
   const report = { url: 'http://127.0.0.1:' + port + '/preview.html', checks: [], screenshots: [] }
   try {
     const cdp = await connect(debugPort, 25000)
+    /**
+     * 执行页面表达式。
+     *
+     * headless Chrome 首次导航/重建执行上下文时，偶发 "Execution context was destroyed"
+     * —— 那是 CDP 的瞬态竞态，不是断言失败。这里对**仅此一类**错误做有限重试，
+     * 其它异常照旧立刻抛出，避免把真实缺陷重试成"通过"。
+     */
     const evaluate = async (expression) => {
-      const result = await cdp.send('Runtime.evaluate', {
-        expression,
-        awaitPromise: true,
-        returnByValue: true,
-      })
-      if (result.exceptionDetails !== undefined) {
-        throw new Error('页面异常：' + JSON.stringify(result.exceptionDetails.exception || result.exceptionDetails))
+      const transient = (err) => /Execution context was destroyed|Cannot find context with specified id/i.test(String(err && err.message))
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const result = await cdp.send('Runtime.evaluate', {
+            expression,
+            awaitPromise: true,
+            returnByValue: true,
+          })
+          if (result.exceptionDetails !== undefined) {
+            throw new Error('页面异常：' + JSON.stringify(result.exceptionDetails.exception || result.exceptionDetails))
+          }
+          return result.result.value
+        } catch (err) {
+          if (attempt >= 4 || !transient(err)) throw err
+          await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)))
+        }
       }
-      return result.result.value
     }
 
     // 等预览真正建好实例

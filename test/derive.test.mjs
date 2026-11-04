@@ -176,12 +176,14 @@ test('单独一条 agent/error 不足以 blocked（生命周期还没确认）',
   assert.equal(h.snapshot().stopCertain, false)
 })
 
-test('agent/error + 系统原因中断 = blocked', () => {
+test('agent/error + 系统原因中断 = idle（取消不猜测因果）', () => {
   const h = registry()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
-  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  // 宿主真实载荷带 turn；这里的关键是：取消终局权威，绝不与并行的错误拼因果。
+  h.reg.onAgent('s1', 'error', { turn: 1, step: 1, error: { code: 'BOOM' } })
   h.reg.onEvent(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'x' } } } })
-  assert.equal(h.phase(), 'blocked', '错误 + 系统原因中断 = 任务级错误停止')
+  assert.equal(h.phase(), 'idle', '被系统取消 ≠ 因错误停止')
+  assert.equal(h.snapshot().stopCertain, false)
 })
 
 test('agent/error + 用户取消 = idle（不把用户取消算成错误）', () => {
@@ -199,21 +201,30 @@ test('原因不明的中断既不 blocked 也不 done', () => {
   assert.equal(h.phase(), 'idle')
 })
 
-test('启动前致命失败：agent/error 后执行器停稳，仍然 blocked', () => {
+test('启动前致命失败：带身份的错误 + 执行器停稳，才是 blocked', () => {
   const h = registry()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
-  h.reg.onAgent('s1', 'error', { error: { code: 'AUTH' } })
+  h.reg.onAgent('s1', 'error', { turn: 1, step: 1, error: { code: 'AUTH' } })
   assert.notEqual(h.phase(), 'blocked')
   h.reg.onAgent('s1', 'status', { status: 'idle' })
   assert.equal(h.phase(), 'blocked', '错误后执行器停稳且这一轮没留下 turn/end')
   assert.equal(h.snapshot().stopSource, 'agent/error+agent/status:idle')
 })
 
+test('启动前致命失败：没有执行身份的错误不能被 idle 确认', () => {
+  const h = registry()
+  h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
+  h.reg.onAgent('s1', 'error', { error: { code: 'OBSERVER' } })
+  h.reg.onAgent('s1', 'status', { status: 'idle' })
+  assert.notEqual(h.phase(), 'blocked', '缺 turn 的错误不能绑定当前任务')
+  assert.equal(h.snapshot().stopCertain, false)
+})
+
 test('致命错误压过挂起交互：执行器已停，等人也没意义', () => {
   const h = registry()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.reg.onEvent(session, { type: 'approval/asked', data: { turn: 1, id: 'a1', toolName: 'write' } })
-  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onAgent('s1', 'error', { turn: 1, step: 1, error: { code: 'BOOM' } })
   assert.equal(h.phase(), 'waiting', '错误还没被确认，旧的挂起审批仍然算 waiting')
   h.reg.onAgent('s1', 'status', { status: 'idle' })
   assert.equal(h.phase(), 'blocked', '确认停止后，残留的审批不能把 blocked 改回 waiting')

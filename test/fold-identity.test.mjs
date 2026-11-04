@@ -108,7 +108,7 @@ test('E5 迟到 agent running 不清除已确认的成功终态', () => {
 test('E6 仅 agent running 不足以抹除已确认的错误停止', () => {
   const h = harness()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
-  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onAgent('s1', 'error', { turn: 1, step: 1, error: { code: 'BOOM' } })
   // 只收到 agent/error 时还不是停止（生命周期未确认）
   assert.notEqual(h.phase(), 'blocked', '单独一条 agent/error 不是停止证据')
   h.reg.onAgent('s1', 'status', { status: 'idle' })
@@ -142,7 +142,7 @@ test('E6d 迟到旧工具成功结果不能让已确认的停止虚假恢复', (
   const h = harness()
   h.reg.onEvent(session, { type: 'turn/start', data: { turn: 1 } })
   h.reg.onEvent(session, { type: 'tool/call', data: { turn: 1, callId: 'c1', name: 'bash' } })
-  h.reg.onAgent('s1', 'error', { error: { code: 'BOOM' } })
+  h.reg.onAgent('s1', 'error', { turn: 1, step: 1, error: { code: 'BOOM' } })
   h.reg.onAgent('s1', 'status', { status: 'idle' })
   assert.equal(h.phase(), 'blocked')
   // 执行器停下后，同轮工具结果迟到送达

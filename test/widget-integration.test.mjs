@@ -1353,6 +1353,19 @@ test('致命停止：宿主确认 stopped-by-error → 感叹号；恢复后退�
   h.api.stop()
 })
 
+test('停止身份缺字段/空串：不冒充已确认错误停止（旧宿主与旧缓存）', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'proj-a')
+  const { slot } = makeRow(h.doc, section, 's1', false)
+  // stopCertain 在，但轮次身份是空串 —— 不能算「同一轮」，依旧降级。
+  h.setState(sessionsBody([{ id: 's1', phase: 'blocked', reason: 'stop:QUOTA', detail: 'QUOTA', stopCertain: true, stopTurnKey: '', turnKey: '' }]))
+  await h.tick(550)
+  const figure = figuresOf(slot)
+  assert.notEqual(figure.phase, 'blocked', '空串身份不能当成同一轮')
+  assert.equal(figure.bang, false)
+  h.api.stop()
+})
+
 test('旧宿主只给 blocked 名字、没有停止证据：不冒充已确认错误停止', async () => {
   const h = await boot()
   const section = makeSection(h.doc, 'proj-a')

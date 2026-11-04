@@ -188,7 +188,8 @@ test('长工具与长等待不受静默阈值影响', () => {
 test('终态归属：completed / error / aborted 各归各位', () => {
   assert.equal(endingOf('completed'), 'success')
   assert.equal(endingOf('error'), 'failure')
-  assert.equal(endingOf('blocked'), 'failure')
+  // preStep 拒绝是「明确的非错误结束」：宿主在 kind='blocked' 上不附 error。
+  assert.equal(endingOf('blocked'), 'neutral')
   assert.equal(endingOf('aborted'), 'neutral')
   assert.equal(endingOf('max-tokens'), 'neutral')
   assert.equal(endingOf('who-knows'), 'neutral')

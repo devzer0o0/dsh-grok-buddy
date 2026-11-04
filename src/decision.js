@@ -59,27 +59,30 @@ export const LEGACY_PHASE_INPUT = Object.freeze({
  *
  *   turn/end reason.kind === 'error'    LlmFailure 终结这一轮（类型：
  *                                       TurnEndReasonMap.error = { kind:'error'; error: LlmFailure }）
- *   turn/end reason.kind === 'blocked'  前置步骤被拒（preStep decision.kind === 'reject'），
- *                                       这一轮不可能继续
- *   agent/error + 系统原因的 aborted    宿主上报错误后以非用户原因中断这一轮
- *                                       （TurnEndCancelCause = user | parent | hook | disposed | legacy）
  *   agent/error + agent/status=idle     执行器在错误后停稳，且这一轮没有留下 turn/end
  *                                       （启动阶段的致命失败走这个口子）
  *
  * ⚠️ 单独一条 agent/error **不是**停止证据：其它插件也会用这个事件汇报
  * 非致命问题（例如持久化 flush 失败）。它只作为「暂定停止」，等宿主生命周期
  * 事实确认后才升级；确认不了就保持诊断，不显示 blocked。
+ *
+ * ⚠️ 明确**不算**错误停止的两种终局：
+ *   · turn/end reason.kind === 'blocked' 是 preStep 拒绝（决策门拒绝进入这一步），
+ *     宿主不附错误 —— 这是「明确的非错误结束」，显示 idle；
+ *   · aborted（user / parent / hook / disposed / legacy）是取消，不是错误。即使
+ *     之前有一条 agent/error，也不猜测因果 —— 取消终局权威，显示 idle。
  */
 export const STOP_SOURCES = Object.freeze({
   TURN_ERROR: 'turn/end:error',
-  TURN_BLOCKED: 'turn/end:blocked',
   AGENT_ERROR: 'agent/error',
-  AGENT_ERROR_CANCEL: 'agent/error+turn/end:aborted',
   AGENT_ERROR_IDLE: 'agent/error+agent/status:idle',
 })
 
-/** 系统原因的中断：只有伴随 agent/error 时才算错误停止（用户取消永远不算）。 */
-export const SYSTEM_CANCEL_CAUSES = Object.freeze(['parent', 'hook'])
+/**
+ * 取消原因里的「系统原因」。**只作诊断标注**：取消本身（无论谁发起）都不是
+ * 错误停止，绝不与并行的 agent/error 拼成因果。
+ */
+export const SYSTEM_CANCEL_CAUSES = Object.freeze(['parent', 'hook', 'disposed'])
 
 /** 结束这一轮、并算作「明确成功」的 turn/end reason。 */
 const SUCCESS_ENDINGS = new Set(['completed'])
@@ -87,8 +90,13 @@ const SUCCESS_ENDINGS = new Set(['completed'])
 /** 结束这一轮、但**不是成功**的 reason（取消/中断/截断/未知）。 */
 const NEUTRAL_ENDINGS = new Set(['aborted', 'interrupted', 'max-tokens', 'forked', 'unknown'])
 
-/** 结束这一轮、并且**已经确认任务因错误停止**的 reason（真实宿主词汇）。 */
-const FAILURE_ENDINGS = new Set(['error', 'blocked'])
+/**
+ * 结束这一轮、并且**已经确认任务因错误停止**的 reason（真实宿主词汇）。
+ *
+ * 只有 'error'：宿主在 preStep 拒绝时写 { kind: 'blocked' } 且不带 error
+ * （见 dsh-agent-loop 的 turn()），那是决策门拒绝，不是错误停止。
+ */
+const FAILURE_ENDINGS = new Set(['error'])
 
 /**
  * 空事实。宿主与页面两侧都以它为起点，字段一致。
@@ -161,7 +169,7 @@ export function isSuccessTerminal(terminal) {
  * 身份校验仍由 currentTerminal() 负责。
  */
 export function isFailureTerminal(terminal) {
-  return terminal !== undefined && terminal !== null && (terminal.kind === 'error' || terminal.kind === 'blocked')
+  return terminal !== undefined && terminal !== null && terminal.kind === 'error'
 }
 
 /** 两条带身份的事实是否属于同一轮（缺身份时不做否定判断）。 */
@@ -197,23 +205,36 @@ export function currentStop(f) {
   if (stop === undefined || stop === null) return undefined
   if (stop.certain !== true) return undefined
   if (stop.cause !== undefined && stop.cause !== 'error') return undefined
-  if (!sameTurnKey(stop.turnKey, f.turnKey)) return undefined
+  // 身份必须**非空且严格相等**：缺身份的停止事实不能套用到当前任务。
+  if (typeof stop.turnKey !== 'string' || stop.turnKey === '') return undefined
+  if (typeof f.turnKey !== 'string' || stop.turnKey !== f.turnKey) return undefined
   const terminal = currentTerminal(f)
   if (isSuccessTerminal(terminal)) return undefined
   return stop
 }
 
 /**
+ * 自动重试流程的**有界**有效期：退避再久，也不能让「重试」无限期顶替静默降级。
+ * 超过这个时长仍没有新的重试事件，就当这条调度已经不再可信。
+ */
+export const RETRY_LIVE_TTL_MS = 10 * 60 * 1000
+
+/**
  * 当前轮是否还有**仍有效**的自动恢复流程（重试调度/正在重试）。
  * 只用于诊断与「重试不该被当成停止」的自检，不产生 blocked。
  *
  * @param {object} f 事实。
+ * @param {number} [now] 当前时刻（用于有界有效期；缺省不看时限）。
  * @returns {boolean} 是否仍在自动恢复中。
  */
-export function isRetryLive(f) {
+export function isRetryLive(f, now) {
   const retry = f !== undefined && f !== null ? f.retry : undefined
   if (retry === undefined || retry === null) return false
-  return sameTurnKey(retry.turnKey, f.turnKey)
+  if (!sameTurnKey(retry.turnKey, f.turnKey)) return false
+  if (typeof now !== 'number') return true
+  const anchor = typeof retry.scheduledAt === 'number' ? retry.scheduledAt : undefined
+  if (anchor === undefined) return true
+  return now - anchor <= RETRY_LIVE_TTL_MS
 }
 
 /**
@@ -325,8 +346,9 @@ export function isCompletionLive(options) {
  *   3. 当前有效非错误结束        → idle（取消 / 截断 / 未知，都不是成功也不是停止）
  *   4. 未终止 + 有挂起交互       → waiting
  *   5. 未终止 + 有未结束工具     → working
- *   6. 未终止 + 模型在跑/自动重试 → thinking
- *   7. 其余（含静默）            → idle
+ *   6. 未终止 + 仍有有效的自动重试 → thinking（先于静默，退避可能长于静默阈值）
+ *   7. 未终止 + 模型在跑         → thinking
+ *   8. 其余（含静默）            → idle
  *
  * ⚠️ 第 2 步是**任务级错误停止**，不是「有任何 error」。诊断错误（facts.error）
  * 与重试事实（facts.retry）都不进这个分支 —— 工具失败后 Agent 继续分析、
@@ -417,13 +439,17 @@ export function decide(facts, options) {
   if (tools.length > 0) {
     return { phase: 'working', reason: 'tool:' + String(tools[0].name || ''), completionKey, done: false }
   }
+  // 仍有效的自动重试**先于静默降级**：退避可能比静默阈值更长，那段时间仍是
+  // 「正在自动恢复」，不是空闲。时限由 RETRY_LIVE_TTL_MS 兜底，避免陈旧调度钉死。
+  if (isRetryLive(f, now)) {
+    return { phase: 'thinking', reason: 'retry', completionKey, done: false }
+  }
   if (silent) {
     return { phase: 'idle', reason: 'silent-turn', completionKey, done: false }
   }
-  // 5) 模型执行中 / 仍有效的自动重试流程 —— 都还是「思考」，不是停止
+  // 5) 模型执行中 —— 仍然是「思考」，不是停止
   if (f.modelPhase === 'requested' || f.modelPhase === 'generating') {
-    const retrying = isRetryLive(f) ? ':retry' : ''
-    return { phase: 'thinking', reason: 'model:' + f.modelPhase + retrying, completionKey, done: false }
+    return { phase: 'thinking', reason: 'model:' + f.modelPhase, completionKey, done: false }
   }
   // 轮开着、没有工具、没有交互、也没有模型阶段证据：刚起步，仍算 thinking。
   return { phase: 'thinking', reason: 'turn-open', completionKey, done: false }

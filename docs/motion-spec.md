@@ -130,8 +130,10 @@
 
 blocked 不是「有错误」，而是**当前任务已被确认因错误停止**：
 
-- ✅ 宿主用 `turn/end` 的 reason=error / blocked 终结了这一轮；
-- ✅ 先报 `agent/error`、随后以系统原因（parent / hook / legacy）中断，或执行器停稳到 idle；
+- ✅ 宿主用 `turn/end` 的 reason=error 终结了这一轮；
+- ✅ 带执行身份（`turn`）的 `agent/error` 之后，执行器停稳到显式 idle 且这一轮没留下 `turn/end`；
+- ❌ `turn/end` reason=blocked（preStep 决策拒绝，宿主不附 error）；
+- ❌ `aborted`（含 parent / hook / disposed / legacy）：取消不是错误，也不与并行错误拼因果；
 - ❌ 单个工具失败、编译/测试失败、子任务失败而主任务继续；
 - ❌ 自动重试仍在退避或正在重试（那属于 thinking）；
 - ❌ 用户主动取消、原因不明的中断、静默、观察链路（state.json）出错。
