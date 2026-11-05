@@ -12,7 +12,7 @@
  * 六个动作 id 与六态一一对应，但**不是**同一层：
  *
  *   idle        → rest          安静：呼吸式视线漂移 + 眨眼 + 偶发转头
- *   working     → spin          转身：持续转头，进入时有一道短暂彩色拖尾
+ *   working     → spin          转身：持续转头 + 一道持续绕行的并排彩色弧带
  *   waiting     → half-lidded   等待：上下压扁的横线眼，低活动度
  *   blocked     → bang          阻止：头像收成感叹号（长条 + 圆点）
  *   thinking    → tri-dot       思考：三颗横点依次脉动（相位差 1/3 周期）
@@ -104,22 +104,26 @@ export const MOTION_SPEC = Object.freeze({
      */
     whipMs: 760,
     whipAmp: -1.85,
-    /** 拖尾爆发：参考帧 310–373 = 1.26s（量测）。 */
-    trailFromMs: 300,
-    trailGrowMs: 420,
-    trailHoldMs: 380,
-    trailFadeMs: 420,
-    /** 拖尾弧长：参考里最长约 150°（量测，帧 330–340）。 */
-    trailArc: 1.9,
     /**
-     * 拖尾半径：参考彩色像素最远 446 px，中心 388.5 → 57.5 px = 0.56D（量测）。
-     * 头像半径是 0.5D，所以拖尾紧贴身体边缘掠过，不是飘在远处。
+     * 侧栏可读性调整（2026-11-05）：参考只展示了一次 1.26s 的短拖尾，旧实现
+     * 在入场 1.52s 后永久隐藏它，长任务只剩张望。现在入场后持续单弧绕行；
+     * 这是用户反馈驱动的产品调整，不声称参考录屏已证明这个循环周期。
      */
-    trailRadius: 0.55,
-    /** 拖尾整条彩带厚度：参考 7–9px = 0.075D（量测，横截面扫描）。 */
-    trailWidth: 0.075,
-    /** 单条色带的厚度（5 条并排塞进整条厚度里）。 */
-    trailBandWidth: 0.03,
+    trailFromMs: 60,
+    trailGrowMs: 220,
+    trailOrbitMs: 2200,
+    /** 弧长轻微呼吸（约 126°–143°），始终留缺口，不画成完整光圈。 */
+    trailArc: 2.35,
+    trailArcPulse: 0.15,
+    /**
+     * 参考彩带紧贴身体边缘。小尺寸调整为 0.59D，配合 0.12D 总宽：
+     * 内缘 0.53D，与脸有间隙；外缘 0.65D，仍在画布半径 0.75D 内。
+     */
+    trailRadius: 0.59,
+    /** 参考约 0.075D；侧栏增至 0.12D，20px 下总厚度 1.6 CSS px。 */
+    trailWidth: 0.12,
+    /** 五条完整弧带径向并排且略重叠，避免小尺寸抗锯齿产生断缝。 */
+    trailBandWidth: 0.035,
     /** 拖尾颜色带：参考里是 5 条并排的彩色带（量测）。 */
     trailColors: Object.freeze(['#7ad8a8', '#7ad87a', '#8a7ad8', '#d87ac0', '#d8b878']),
   }),
@@ -413,35 +417,21 @@ export function sampleFrame(motionId, tMs, options) {
     frame.body.turn = turn * 0.35
     frame.eyes.turn = turn
     frame.eyes.gazeY = 0.4 * Math.sin((t / 1600) * Math.PI * 2)
-    // 拖尾：进入后短暂出现，先长后短再消失（参考帧 310–373）
+    // 单道彩色弧带持续绕行：只增长入场一次，不在每圈接缝清零或重播甩头。
     const start = spec.trailFromMs
     if (t >= start) {
       const p = t - start
-      const span = spec.trailGrowMs + spec.trailHoldMs + spec.trailFadeMs
-      if (p < span) {
-        let len
-        let alpha
-        if (p < spec.trailGrowMs) {
-          len = spec.trailArc * easeOut(p / spec.trailGrowMs)
-          alpha = clamp(p / 120, 0, 1)
-        } else if (p < spec.trailGrowMs + spec.trailHoldMs) {
-          len = spec.trailArc
-          alpha = 1
-        } else {
-          const q = (p - spec.trailGrowMs - spec.trailHoldMs) / spec.trailFadeMs
-          len = spec.trailArc * (1 - smoothstep(q))
-          alpha = 1 - smoothstep(q)
-        }
-        frame.trail.visible = len > 0.01 && alpha > 0.01
-        frame.trail.alpha = alpha
-        frame.trail.radius = spec.trailRadius * D
-        frame.trail.width = spec.trailWidth * D
-        // 弧的头部跟随转头、尾部滞后 → 看起来是「甩出去的一道」
-        const head = turn - 0.35
-        frame.trail.from = head - len
-        frame.trail.to = head
-        frame.trail.colors = Array.from(spec.trailColors)
-      }
+      const angle = (p / spec.trailOrbitMs) * Math.PI * 2
+      const grow = easeOut(clamp(p / spec.trailGrowMs, 0, 1))
+      const len = (spec.trailArc + spec.trailArcPulse * Math.sin(angle)) * grow
+      frame.trail.visible = grow > 0.01
+      frame.trail.alpha = grow
+      frame.trail.radius = spec.trailRadius * D
+      frame.trail.width = spec.trailWidth * D
+      const head = 4.25 + angle
+      frame.trail.from = head - len
+      frame.trail.to = head
+      frame.trail.colors = Array.from(spec.trailColors)
     }
     return frame
   }
@@ -569,11 +559,11 @@ export function staticFrame(motionId) {
     frame.eyes.turn = -0.42
     frame.body.turn = -0.15
     frame.trail.visible = true
-    frame.trail.alpha = 0.9
+    frame.trail.alpha = 1
     frame.trail.radius = MOTION_SPEC.spin.trailRadius * D
     frame.trail.width = MOTION_SPEC.spin.trailWidth * D
-    frame.trail.from = 2.35
     frame.trail.to = 4.25
+    frame.trail.from = frame.trail.to - MOTION_SPEC.spin.trailArc
     frame.trail.colors = Array.from(MOTION_SPEC.spin.trailColors)
     return frame
   }
@@ -701,13 +691,14 @@ export function orbitPoints(ring, cx, cy, segments) {
 }
 
 /**
- * 把拖尾弧切成若干彩色段。
+ * 生成并排彩带的完整弧线。每种颜色覆盖同一角度区间，径向错位由渲染层负责；
+ * 不能按角度切成五小段，否则每种颜色只剩亚像素宽的一截，参考的厚彩带消失。
  *
  * @param {object} trail 拖尾参数。
  * @param {number} cx 圆心 x。
  * @param {number} cy 圆心 y。
- * @param {number} [bands] 段数。
- * @returns {Array<{color: string, points: Array<[number, number]>}>} 每段的折线。
+ * @param {number} [bands] 色带条数。
+ * @returns {Array<{color: string, points: Array<[number, number]>}>} 每条完整弧线。
  */
 export function trailBands(trail, cx, cy, bands) {
   const colors = Array.isArray(trail.colors) ? trail.colors : []
@@ -717,12 +708,10 @@ export function trailBands(trail, cx, cy, bands) {
   const total = trail.to - trail.from
   if (!(total > 0.001)) return out
   for (let i = 0; i < n; i++) {
-    const a = trail.from + (total * i) / n
-    const b = trail.from + (total * (i + 1)) / n
     const points = []
-    const steps = 14
+    const steps = 48
     for (let s = 0; s <= steps; s++) {
-      const ang = a + ((b - a) * s) / steps
+      const ang = trail.from + (total * s) / steps
       points.push([cx + Math.cos(ang) * trail.radius, cy + Math.sin(ang) * trail.radius])
     }
     out.push({ color: colors.length === 0 ? '#7ad8a8' : colors[i % colors.length], points })

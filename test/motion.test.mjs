@@ -4,7 +4,7 @@
  * 旧版本这一层只断言「六个动作名字互不相同」，所以「blocked = 瞪眼不眨眼」
  * 这种完全不对的实现也能全绿。现在改成：
  *   1. 每个动作在确定时刻采样，断言它画出来的**构成**（头像 / 感叹号 / 三点 / 轨道）
- *   2. 断言时间行为（拖尾出现再消退、三点有相位差、轨道在动、同态不重播）
+ *   2. 断言时间行为（工作彩带持续绕行、三点有相位差、轨道在动、同态不重播）
  *   3. 断言任意两态切换都能量到中间态，而不是硬跳
  *
  * @module test/motion.test
@@ -199,18 +199,51 @@ test('A8 idle 的眨眼是纵向压扁，且不改变视线朝向', () => {
 
 // ── B. 时间行为 ────────────────────────────────────────────────────────────
 
-test('B1 working 的拖尾：进入后出现、随后缩短并淡出（不是常驻）', () => {
+test('B1 working 的彩带入场后持续可见，长任务不能退成只有张望的脸', () => {
   const spec = MOTION_SPEC.spin
   assert.equal(hasTrail(sampleFrame('spin', 0)), false, '刚进入时还没有拖尾')
   const grown = sampleFrame('spin', spec.trailFromMs + spec.trailGrowMs)
-  assert.ok(hasTrail(grown), '拖尾要真的出现')
-  const arc1 = grown.trail.to - grown.trail.from
-  const faded = sampleFrame('spin', spec.trailFromMs + spec.trailGrowMs + spec.trailHoldMs + spec.trailFadeMs + 40)
-  assert.equal(hasTrail(faded), false, '拖尾必须消退，不能一直挂着')
-  assert.ok(arc1 > 1.0, '拖尾是一道弧，不是一小截线头（' + arc1.toFixed(2) + ' rad）')
-  // 消退途中应该比最长时短
-  const shrinking = sampleFrame('spin', spec.trailFromMs + spec.trailGrowMs + spec.trailHoldMs + spec.trailFadeMs * 0.6)
-  assert.ok(shrinking.trail.to - shrinking.trail.from < arc1, '消退是缩短 + 淡出，不是直接消失')
+  assert.ok(hasTrail(grown), '彩带要在入场阶段形成')
+  for (let t = 1600; t <= 60000; t += 40) {
+    const frame = sampleFrame('spin', t)
+    assert.ok(hasTrail(frame), t + 'ms 时仍须有环绕彩带')
+    assert.ok(frame.trail.alpha >= 0.9, t + 'ms 时不能变淡到难以识别')
+    const arc = frame.trail.to - frame.trail.from
+    assert.ok(arc >= 2 && arc < Math.PI, '保持明显的短弧，不变成整圈边框')
+    assert.equal(hasOrbits(frame), false, 'working 不借用 done 的多层交叉轨道')
+  }
+  assert.ok(hasTrail(sampleFrame('spin', 60 * 60 * 1000)), '长时间工作仍有彩带')
+})
+
+test('B1b working 的彩带确实绕完整一圈，循环接缝不闪断', () => {
+  const spec = MOTION_SPEC.spin
+  const head = (t) => {
+    const f = sampleFrame('spin', t).trail
+    return [Math.cos(f.to), Math.sin(f.to)]
+  }
+  const a = head(5000)
+  const b = head(5000 + spec.trailOrbitMs / 2)
+  const c = head(5000 + spec.trailOrbitMs)
+  assert.ok(a[0] * b[0] + a[1] * b[1] < -0.99, '半圈后到达头像另一侧，而非原地摆动')
+  assert.ok(Math.hypot(a[0] - c[0], a[1] - c[1]) < 0.001, '一圈回到同一位置')
+  for (let n = 1; n <= 5; n++) {
+    const edge = spec.trailFromMs + n * spec.trailOrbitMs
+    const before = sampleFrame('spin', edge - 1).trail
+    const after = sampleFrame('spin', edge + 1).trail
+    assert.ok(before.visible && after.visible, '循环边界保持可见')
+    assert.ok(Math.abs(after.to - before.to) < 0.02, '头部连续，无重播跳变')
+    assert.ok(Math.abs((after.to - after.from) - (before.to - before.from)) < 0.02, '弧长连续')
+  }
+})
+
+test('B1c 离开 working 后彩带退场，其他运行态不残留工作特效', () => {
+  const from = sampleFrame('spin', 5000)
+  assert.ok(hasTrail(from))
+  for (const motion of ['rest', 'half-lidded', 'bang', 'tri-dot', 'orbit']) {
+    const to = sampleFrame(motion, 5000)
+    const exited = blendFrames(from, to, 1)
+    assert.equal(hasTrail(exited), false, motion + ' 不残留工作彩带')
+  }
 })
 
 test('B2 working 的转头是持续张望，幅度明显大于 idle 的呼吸', () => {
@@ -687,7 +720,7 @@ test('F3 reduced-motion 的静态三点沿用调整后的点径与间距', () =>
   assert.deepEqual(staticFrame('tri-dot'), stat, '静态帧必须稳定')
 })
 
-test('E4 拖尾按颜色切成多段（参考里是并排的彩色带）', () => {
+test('E4 工作彩带是五条并排的完整弧，不是五截越来越细的短线', () => {
   const frame = sampleFrame('spin', MOTION_SPEC.spin.trailFromMs + MOTION_SPEC.spin.trailGrowMs)
   const bands = trailBands(frame.trail, BOT_CENTER, BOT_CENTER, 5)
   assert.equal(bands.length, 5)
@@ -695,4 +728,21 @@ test('E4 拖尾按颜色切成多段（参考里是并排的彩色带）', () =>
   const first = bands[0].points[0]
   const r = Math.hypot(first[0] - BOT_CENTER, first[1] - BOT_CENTER)
   assert.ok(Math.abs(r - frame.trail.radius) < 1, '拖尾落在规格半径上')
+  for (const band of bands) {
+    assert.deepEqual(band.points[0], first, '色带必须从同一角度起笔（径向错位由渲染层负责）')
+    assert.deepEqual(band.points.at(-1), bands[0].points.at(-1), '每种颜色都覆盖完整弧段')
+  }
+})
+
+test('E4b 工作彩带在 20px/16px 下有足够总厚度，转到任何方向都不溢出画布', () => {
+  const spec = MOTION_SPEC.spin
+  for (const size of [20, 16]) {
+    const pxPerUnit = size / (D * 1.5)
+    const thickness = spec.trailWidth * D * pxPerUnit
+    assert.ok(thickness >= size * 0.075, size + 'px 下彩带厚度不足：' + thickness)
+    assert.ok(spec.trailRadius - spec.trailWidth / 2 > 0.5, '彩带与脸的外沿应有间隙')
+    assert.ok(spec.trailRadius + spec.trailWidth / 2 < 0.75, '含线宽必须完整落在画布内')
+  }
+  const still = staticFrame('spin')
+  assert.equal(still.trail.width, sampleFrame('spin', 5000).trail.width, '静态和动态使用同一套可读尺寸')
 })

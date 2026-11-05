@@ -414,6 +414,59 @@ async function main() {
       record(id + ' 图层构成正确', actual !== null && fn(actual), actual)
     }
 
+    // 不只验证 preview 的纯模块：实际 bundle 在真实浏览器中持续工作、反复 sync
+    // 两圈后，彩带仍须可见且路径持续变化，不能入场结束就退成普通圆脸。
+    const workingTrail = await evaluate(`(async () => {
+      await new Promise((r) => setTimeout(r, 1800))
+      const row = document.querySelector('[data-row-key="session:p-working"]')
+      const svg = row.querySelector('svg.dsgb')
+      const title = row.querySelector('.Kx9_title')
+      const titleLeft = title.getBoundingClientRect().left
+      const g = svg.querySelector('[data-dsgb-layer="trail"]')
+      const initialNodes = Array.from(g.children)
+      const samples = []
+      for (let i = 0; i < 28; i++) {
+        window.__dshGrokBuddy.sync()
+        await new Promise((r) => setTimeout(r, 180))
+        const paths = Array.from(g.children)
+        const canvas = svg.getBoundingClientRect()
+        const geometry = paths.map((p) => {
+          const m = p.getScreenCTM()
+          const scale = Math.hypot(m.a, m.b)
+          const width = Number.parseFloat(getComputedStyle(p).strokeWidth) * scale
+          const b = p.getBoundingClientRect()
+          return {
+            length: p.getTotalLength() * scale,
+            inside: b.left - width / 2 >= canvas.left && b.top - width / 2 >= canvas.top &&
+              b.right + width / 2 <= canvas.right && b.bottom + width / 2 <= canvas.bottom,
+          }
+        })
+        samples.push({
+          shown: getComputedStyle(g).display !== 'none' && Number(getComputedStyle(g).opacity) >= 0.9,
+          count: paths.length,
+          inside: geometry.every((p) => p.inside),
+          fullBands: geometry.every((p) => p.length >= canvas.width * 0.6),
+          d: paths.map((p) => p.getAttribute('d')).join('|'),
+          reused: paths.length === initialNodes.length && paths.every((p, j) => p === initialNodes[j]),
+          stableLayout: Math.abs(title.getBoundingClientRect().left - titleLeft) < 0.01,
+          phase: svg.getAttribute('data-dsgb-phase'),
+        })
+      }
+      return {
+        samples: samples.length,
+        visible: samples.every((s) => s.shown && s.count === 5 && s.phase === 'working'),
+        geometry: samples.every((s) => s.inside && s.fullBands),
+        reused: samples.every((s) => s.reused),
+        stableLayout: samples.every((s) => s.stableLayout),
+        uniquePaths: new Set(samples.map((s) => s.d)).size,
+      }
+    })()`)
+    record('working 长时间执行与重复 sync：彩带持续绕行，不消失、不裁切、不挤标题',
+      workingTrail.visible && workingTrail.geometry && workingTrail.reused &&
+      workingTrail.stableLayout && workingTrail.uniquePaths >= 20, workingTrail)
+    const workingShot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+    fs.writeFileSync(path.join(OUT, 'working-sidebar.png'), Buffer.from(workingShot.data, 'base64'))
+
     // 未知会话（不在快照里、只有 DOM done）：兜底身份也要庆祝
     const ghost = await evaluate(`(() => {
       const row = document.querySelector('[data-row-key="session:p-ghost"]')

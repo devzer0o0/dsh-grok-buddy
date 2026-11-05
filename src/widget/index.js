@@ -30,7 +30,7 @@ import { CONFIRMED_STOP_SOURCES, DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, norma
 import { BOT_SIZE, folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-04-blocked-ledger'
+const BUILD = '2026-11-05-working-orbit'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'

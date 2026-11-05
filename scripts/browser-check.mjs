@@ -6,7 +6,8 @@
  * 与真实帧推进。这一层专门补这个缺口，不引入任何 npm 依赖。
  *
  * 用法：
- *   node scripts/browser-check.mjs [--out /tmp/xxx] [--keep]
+ *   node scripts/browser-check.mjs [--out /tmp/xxx] [--keep] [--working-frames]
+ *   --working-frames 额外输出工作态真实尺寸的 PNG 帧序列（20fps，4.4s）
  *
  * 会做的事：
  *   1. 起一个临时静态服务器（只服务本仓库）
@@ -189,7 +190,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 50))
       }
       return { ok: false }
-    })()`)
+    })()`, { idempotent: true })
     report.checks.push({ name: 'preview booted', pass: ready.ok === true, detail: ready })
 
     const record = (name, pass, detail) => report.checks.push({ name, pass: pass === true, detail })
@@ -233,7 +234,7 @@ async function main() {
       })()`)
       const expect = {
         idle: (i) => i.body && i.eyes && !i.bang && !i.dots,
-        working: (i) => i.body && i.eyes && !i.bang && !i.dots,
+        working: (i) => i.body && i.eyes && !i.bang && !i.dots && i.trail === 5,
         waiting: (i) => i.body && i.eyes && !i.bang && !i.dots,
         blocked: (i) => i.bang && !i.body && !i.eyes && !i.dots,
         thinking: (i) => i.dots && i.dotCount === 3 && !i.body && !i.eyes,
@@ -376,6 +377,94 @@ async function main() {
       return { sameInstance: before === after || window.__preview.live.length > 0, ink }
     })()`)
     record('切换深浅背景后仍有可用实例与墨色', theme.sameInstance === true && typeof theme.ink === 'string', theme)
+
+    // working 的验收不能停在入场 350ms：旧版本 1.52s 后整道彩带永久消失。
+    // 用产品引擎的可控时钟画完多圈，并读取真实 SVG 路径、线宽和包含描边的矩形。
+    for (const themeName of ['Light', 'Dark']) {
+      const working = await evaluate(`(() => {
+        document.getElementById('bg${themeName}').click()
+        window.__preview.selectPhase('working')
+        window.__preview.state.playing = false
+        for (const rec of window.__preview.live) rec.handle.pause()
+        const sizes = [16, 20, 32, 64]
+        const result = []
+        for (const size of sizes) {
+          const rec = window.__preview.live.find((x) => x.size === size)
+          const svg = rec.inst.svg
+          const g = rec.inst.trailGroup
+          const rows = []
+          let initialNodes
+          let reused = true
+          const times = [1600, 30000, 60000]
+          for (let t = 5000; t <= 7200; t += 40) times.push(t)
+          for (const t of times) {
+            rec.handle.step(t)
+            const canvas = svg.getBoundingClientRect()
+            const paths = Array.from(g.children)
+            if (initialNodes === undefined) initialNodes = paths
+            reused = reused && paths.length === initialNodes.length && paths.every((p, i) => p === initialNodes[i])
+            const shown = getComputedStyle(g).display !== 'none' && Number(getComputedStyle(g).opacity) >= 0.9
+            const geometry = paths.map((p) => {
+              const m = p.getScreenCTM()
+              const scale = Math.hypot(m.a, m.b)
+              const width = Number.parseFloat(getComputedStyle(p).strokeWidth) * scale
+              const b = p.getBoundingClientRect()
+              return {
+                width,
+                length: p.getTotalLength() * scale,
+                inside: b.left - width / 2 >= canvas.left && b.top - width / 2 >= canvas.top &&
+                  b.right + width / 2 <= canvas.right && b.bottom + width / 2 <= canvas.bottom,
+              }
+            })
+            rows.push({ shown, count: paths.length, geometry, d: paths.map((p) => p.getAttribute('d')).join('|') })
+          }
+          result.push({
+            size, samples: rows.length, reused,
+            visible: rows.every((r) => r.shown && r.count === 5),
+            minWidth: Math.min(...rows.flatMap((r) => r.geometry.map((p) => p.width))),
+            minLength: Math.min(...rows.flatMap((r) => r.geometry.map((p) => p.length))),
+            inside: rows.every((r) => r.geometry.every((p) => p.inside)),
+            uniquePaths: new Set(rows.map((r) => r.d)).size,
+          })
+        }
+        // 截图固定在入场已结束的 5s：只看入场会掩盖本次缺陷。
+        for (const rec of window.__preview.live) rec.handle.step(5000)
+        return result
+      })()`)
+      for (const sample of working) {
+        record(
+          'working ' + themeName + ' ' + sample.size + 'px：60s 仍可见、五条完整彩带、绕行且不裁切',
+          sample.visible && sample.inside && sample.reused && sample.uniquePaths >= 20 &&
+            sample.minWidth >= sample.size * 0.022 && sample.minLength >= sample.size * 0.6,
+          sample,
+        )
+      }
+      const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+      const file = path.join(OUT_DIR, 'working-steady-' + themeName.toLowerCase() + '.png')
+      fs.writeFileSync(file, Buffer.from(shot.data, 'base64'))
+      report.screenshots.push(file)
+    }
+
+    if (process.argv.includes('--working-frames')) {
+      const frameDir = path.join(OUT_DIR, 'working-frames')
+      fs.mkdirSync(frameDir, { recursive: true })
+      const clip = await evaluate(`(() => {
+        const panel = document.getElementById('sizes').closest('.panel')
+        panel.style.width = '600px'
+        panel.querySelector('.hint').textContent = '64 / 32 / 20 / 16 CSS px · 20px 为当前侧栏尺寸 · 彩带持续绕行 2.2s/圈'
+        panel.previousElementSibling.textContent = 'working · 工作超过 5 秒后（产品渲染器）'
+        const b = panel.getBoundingClientRect()
+        return { x: b.x, y: b.y - 32, width: b.width, height: b.height + 40, scale: 1 / devicePixelRatio }
+      })()`)
+      for (let i = 0; i < 88; i++) {
+        await evaluate(`(() => {
+          for (const rec of window.__preview.live) rec.handle.step(${5000 + i * 50})
+        })()`)
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png', clip })
+        fs.writeFileSync(path.join(frameDir, String(i).padStart(3, '0') + '.png'), Buffer.from(shot.data, 'base64'))
+      }
+      report.workingFrames = { directory: frameDir, fps: 20, frames: 88, source: 'product renderer, t=5000..9350ms' }
+    }
 
     cdp.close()
   } finally {

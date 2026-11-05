@@ -7,7 +7,8 @@
  *
  * 为什么重写：参考录屏里的六态**不只是换眼型** —— blocked 是头像收成感叹号，
  * thinking 是头像消失后三颗点脉动，done 是头像 + 多条前后穿插的彩色轨道，
- * working 是转头时甩出的一道短拖尾。旧引擎只有「圆脸 + 两只眼睛」一种模型，
+ * working 是转头与彩色弧带（现按侧栏可读性要求持续绕行）。旧引擎只有
+ * 「圆脸 + 两只眼睛」一种模型，
  * 无论怎么调表情池都表达不出来。这里补上了符号层、轨道层、拖尾层与进入/退出
  * 所需的缩放与透明度。
  *
@@ -234,7 +235,7 @@ export function createBot(opts) {
   eyeGroup.appendChild(eyeR)
   // 前景轨道（压在头像上）
   const orbitsFront = make(ns, 'g', { class: 'dsgb-orbits-front', 'data-dsgb-layer': 'orbits-front' })
-  // 拖尾（工作态那一甩）
+  // 工作态的单道并排彩带（与完成态的多条交叉轨道分开）
   const trailGroup = make(ns, 'g', { class: 'dsgb-trail', 'data-dsgb-layer': 'trail' })
   // 符号层：感叹号
   const bangGroup = make(ns, 'g', { class: 'dsgb-bang', 'data-dsgb-layer': 'bang' })
@@ -516,7 +517,7 @@ function paintOrbits(inst, frame) {
 }
 
 /**
- * 拖尾：参考里是一道短暂的多色弧，扫过头像侧面后就缩短、淡出。
+ * 工作彩带：保留参考的并排多色弧；按侧栏可读性要求持续绕行，不再只播入场。
  * @param {object} inst 实例。
  * @param {object} frame 当前帧。
  */
