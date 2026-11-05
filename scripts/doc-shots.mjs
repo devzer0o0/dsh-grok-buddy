@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
-const OUT = path.join(ROOT, process.argv.includes('--out') ? process.argv[process.argv.indexOf('--out') + 1] : 'docs')
+const OUT = path.resolve(ROOT, process.argv.includes('--out') ? process.argv[process.argv.indexOf('--out') + 1] : 'docs')
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.gif': 'image/gif' }
 
@@ -140,13 +140,13 @@ async function main() {
     })()`)
     await shoot('states-64.png', { ...bigGrid, scale: 3 })
 
-    // 20px 那一排（BOT_SIZE，按 8 倍截，便于在文档里看清真实像素）
+    // 24px 那一排（BOT_SIZE，按 8 倍截，便于在文档里看清真实像素）
     const smallGrid = await evaluate(`(() => {
       const grids = document.querySelectorAll('.grid')
       const plane = grids[1].getBoundingClientRect()
       return { x: Math.max(0, plane.x - 4), y: Math.max(0, plane.y - 4), width: plane.width + 8, height: plane.height + 8 }
     })()`)
-    await shoot('states-20.png', { ...smallGrid, scale: 8 })
+    await shoot('states-24.png', { ...smallGrid, scale: 8 })
 
     // faces 页
     await cdp.send('Page.navigate', { url: 'http://127.0.0.1:' + port + '/docs/faces.html' })

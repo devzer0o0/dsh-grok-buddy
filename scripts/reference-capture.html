@@ -1,0 +1,16 @@
+<!-- Offline capture adapter for the original public renderer. No product imports. -->
+<!doctype html><meta charset="utf-8"><style>body{background:#191b19;color:white} svg{width:300px;height:300px;overflow:visible}.head{fill:var(--fg)}.eye{fill:var(--bg)}</style><script>window.onerror=(m,u,l)=>document.body.append(m+' '+l)</script><body><script src="/__official-motion.js"></script><script>
+let clock=0,queue=[],hooks=[],cursor=0,effects=[];
+performance.now=()=>clock;requestAnimationFrame=cb=>(queue.push(cb),queue.length);cancelAnimationFrame=()=>{};
+const react={forwardRef:fn=>fn,useRef:v=>hooks[cursor++]??(hooks[cursor-1]={current:v}),useId:()=> 'reference-avatar',useImperativeHandle:()=>{},useEffect(fn,deps){let n=cursor++;if(!hooks[n]||deps.some((v,i)=>v!==hooks[n][i])){effects.push(fn);hooks[n]=deps}}};
+const jsx=(tag,props)=>({tag,props});
+TURBOPACK[0][2]({i:id=>id===882441?react:id===259329?{jsx,jsxs:jsx}:id===582981?{default:{head:'head',eye:'eye',svg:'svg'}}:{default:()=>null},s:()=>{}});
+function element(v){if(!v)return null;const el=document.createElementNS('http://www.w3.org/2000/svg',v.tag);for(const[k,val]of Object.entries(v.props||{})){if(k==='children'){for(const c of [val].flat(Infinity)){if(c){const child=element(c);if(child)el.append(child)}}}else if(k==='style'){Object.entries(val||{}).forEach(([a,b])=>a.startsWith('--')?el.style.setProperty(a,b):el.style[a]=typeof b==='number'&&['width','height'].includes(a)?b+'px':b)}else if(k==='ref'){if(typeof val==='function')val(el);else if(val)val.current=el}else if(val!=null){el.setAttribute(({className:'class',clipPath:'clip-path',stopColor:'stop-color'})[k]||k,val)}}return el}
+function mount(state='working',size=128){clock=0;queue=[];hooks=[];cursor=0;effects=[];let svg=element(RefRenderer({state,size,ink:'#fff',background:'#191b19',faceTune:RefData.tune(state),...RefData.options(state)},null));document.body.replaceChildren(svg);effects.forEach(fn=>fn());return svg}
+function advance(to){while(clock+1000/60<=to+.0001){clock=(Math.round(clock/(1000/60))+1)*(1000/60);const q=queue;queue=[];q.forEach(cb=>cb(clock))}return document.querySelector('svg').outerHTML}
+function snapshot(){
+ const svg=document.querySelector('svg'),eyes=[...svg.querySelectorAll('.eye')];
+ return {time:clock,pose:eyes[0].parentNode.parentNode.getAttribute('transform'),eyes:eyes.map(el=>({d:el.getAttribute('d'),transform:el.getAttribute('transform'),visible:el.style.display!=='none'})),ribbons:[...svg.querySelectorAll('linearGradient')].map(g=>({id:g.id,x1:g.getAttribute('x1'),y1:g.getAttribute('y1'),x2:g.getAttribute('x2'),y2:g.getAttribute('y2'),colors:[...g.children].map(s=>s.getAttribute('stop-color')),paths:[...svg.querySelectorAll('[data-trail]')].filter(p=>p.getAttribute('fill')==='url(#'+g.id+')').map(p=>({d:p.getAttribute('d'),alpha:p.getAttribute('opacity')}))}))};
+}
+window.ref={mount,advance,snapshot};
+</script>

@@ -27,6 +27,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BOT_SIZE } from '../src/widget/styles.js'
+import { createRegistry } from '../lib/derive.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
@@ -103,18 +104,18 @@ const HARNESS = `<!doctype html><html lang="zh-CN" data-ds-theme="light"><head><
   html{--row-fg:#1f2328;--row-bg:#ffffff;--slot-fg:#8a8f98}
   html[data-ds-theme="dark"]{--row-fg:#dfe2e8;--row-bg:#14161a}
   body{margin:0;background:var(--row-bg);color:var(--row-fg);font:13px -apple-system,"PingFang SC",sans-serif}
-  .groupSection{padding:6px;width:280px}
+  .JoiKIa_groupSection{padding:6px;width:280px}
   .JoiKIa_projectRow,.JoiKIa_sessionRow{border-radius:8px;padding:0 8px;cursor:pointer;user-select:none;color:var(--row-fg);align-items:center;gap:6px;display:flex}
   .JoiKIa_projectRow{box-sizing:border-box;height:34px}
   .JoiKIa_sessionRow{gap:0;height:32px}
-  .JoiKIa_slot{width:16px;height:20px;color:var(--slot-fg);flex:none;justify-content:center;align-items:center;display:inline-flex}
+  .JoiKIa_slot,.Kx9_slot{width:16px;height:20px;color:var(--slot-fg);flex:none;justify-content:center;align-items:center;display:inline-flex}
   .JoiKIa_folderActive{color:#1084fe}
   .JoiKIa_chevron{display:none}
   .JoiKIa_projectRow:hover .JoiKIa_chevron{display:inline-flex}
   .JoiKIa_projectRow:hover .JoiKIa_folder{display:none}
   .JoiKIa_arrow{transition:transform .15s}
   .JoiKIa_arrowOpen{transform:rotate(90deg)}
-  .JoiKIa_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}
+  .JoiKIa_title,.Kx9_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}
   .JoiKIa_rowActions{flex:none;align-items:center;gap:15px;display:none}
   .JoiKIa_projectRow:hover .JoiKIa_rowActions{display:inline-flex}
   .JoiKIa_iconButton{border-radius:4px;cursor:pointer;width:16px;height:16px;color:var(--slot-fg);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}
@@ -127,6 +128,7 @@ const HARNESS = `<!doctype html><html lang="zh-CN" data-ds-theme="light"><head><
   const sidebar = document.getElementById('sidebar')
   const sessionRow = (row) => {
     const el = document.createElement('div')
+    el.className = 'JoiKIa_sessionRow'
     el.setAttribute('data-row-key', 'session:' + row.id)
     el.setAttribute('role', 'treeitem')
     el.setAttribute('aria-selected', row.selected ? 'true' : 'false')
@@ -135,6 +137,13 @@ const HARNESS = `<!doctype html><html lang="zh-CN" data-ds-theme="light"><head><
     const dot = document.createElement('span')
     dot.setAttribute('data-state', row.dshState)
     slot.appendChild(dot)
+    if (row.id === 'p-working') {
+      const clock = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      clock.setAttribute('data-session-schedule-mark', 'true')
+      clock.setAttribute('width', '16'); clock.setAttribute('height', '16')
+      clock.innerHTML = '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor"/>'
+      slot.appendChild(clock)
+    }
     el.appendChild(slot)
     const title = document.createElement('span')
     title.className = 'Kx9_title'
@@ -414,56 +423,26 @@ async function main() {
       record(id + ' 图层构成正确', actual !== null && fn(actual), actual)
     }
 
-    // 不只验证 preview 的纯模块：实际 bundle 在真实浏览器中持续工作、反复 sync
-    // 两圈后，彩带仍须可见且路径持续变化，不能入场结束就退成普通圆脸。
+    // Actual shipped bundle, real RAF and repeated sync across multiple performances.
     const workingTrail = await evaluate(`(async () => {
-      await new Promise((r) => setTimeout(r, 1800))
-      const row = document.querySelector('[data-row-key="session:p-working"]')
-      const svg = row.querySelector('svg.dsgb')
-      const title = row.querySelector('.Kx9_title')
-      const titleLeft = title.getBoundingClientRect().left
-      const g = svg.querySelector('[data-dsgb-layer="trail"]')
-      const initialNodes = Array.from(g.children)
-      const samples = []
-      for (let i = 0; i < 28; i++) {
-        window.__dshGrokBuddy.sync()
-        await new Promise((r) => setTimeout(r, 180))
-        const paths = Array.from(g.children)
-        const canvas = svg.getBoundingClientRect()
-        const geometry = paths.map((p) => {
-          const m = p.getScreenCTM()
-          const scale = Math.hypot(m.a, m.b)
-          const width = Number.parseFloat(getComputedStyle(p).strokeWidth) * scale
-          const b = p.getBoundingClientRect()
-          return {
-            length: p.getTotalLength() * scale,
-            inside: b.left - width / 2 >= canvas.left && b.top - width / 2 >= canvas.top &&
-              b.right + width / 2 <= canvas.right && b.bottom + width / 2 <= canvas.bottom,
-          }
-        })
-        samples.push({
-          shown: getComputedStyle(g).display !== 'none' && Number(getComputedStyle(g).opacity) >= 0.9,
-          count: paths.length,
-          inside: geometry.every((p) => p.inside),
-          fullBands: geometry.every((p) => p.length >= canvas.width * 0.6),
-          d: paths.map((p) => p.getAttribute('d')).join('|'),
-          reused: paths.length === initialNodes.length && paths.every((p, j) => p === initialNodes[j]),
-          stableLayout: Math.abs(title.getBoundingClientRect().left - titleLeft) < 0.01,
-          phase: svg.getAttribute('data-dsgb-phase'),
-        })
+      await new Promise(r=>setTimeout(r,1800))
+      const row=document.querySelector('[data-row-key="session:p-working"]'),svg=row.querySelector('svg.dsgb'),title=row.querySelector('.Kx9_title')
+      const left=title.getBoundingClientRect().left
+      const groups=['trail-back','trail'].map(name=>svg.querySelector('[data-dsgb-layer="'+name+'"]'))
+      const samples=[];let inside=true,stableLayout=true,bounded=true
+      for(let i=0;i<42;i++){
+        window.__dshGrokBuddy.sync();await new Promise(r=>setTimeout(r,180))
+        const canvas=svg.getBoundingClientRect()
+        const paths=groups.flatMap(g=>getComputedStyle(g).display==='none'?[]:Array.from(g.children).filter(p=>p.getAttribute('d')))
+        for(const p of paths){const b=p.getBoundingClientRect();inside=inside&&b.left>=canvas.left-.03&&b.top>=canvas.top-.03&&b.right<=canvas.right+.03&&b.bottom<=canvas.bottom+.03}
+        bounded=bounded&&groups.every(g=>g.children.length<=5)
+        stableLayout=stableLayout&&Math.abs(title.getBoundingClientRect().left-left)<.01
+        samples.push({active:paths.length>0,d:paths.map(p=>p.getAttribute('d')).join('|'),phase:svg.getAttribute('data-dsgb-phase')})
       }
-      return {
-        samples: samples.length,
-        visible: samples.every((s) => s.shown && s.count === 5 && s.phase === 'working'),
-        geometry: samples.every((s) => s.inside && s.fullBands),
-        reused: samples.every((s) => s.reused),
-        stableLayout: samples.every((s) => s.stableLayout),
-        uniquePaths: new Set(samples.map((s) => s.d)).size,
-      }
+      return {inside,stableLayout,bounded,phaseStable:samples.every(s=>s.phase==='working'),active:samples.filter(s=>s.active).length,quiet:samples.filter(s=>!s.active).length,uniquePaths:new Set(samples.map(s=>s.d)).size}
     })()`)
-    record('working 长时间执行与重复 sync：彩带持续绕行，不消失、不裁切、不挤标题',
-      workingTrail.visible && workingTrail.geometry && workingTrail.reused &&
-      workingTrail.stableLayout && workingTrail.uniquePaths >= 20, workingTrail)
+    record('working 实际 bundle：反复 sync 不重置，尾迹多轮出现和收尾，不裁切/挤标题',
+      workingTrail.inside&&workingTrail.stableLayout&&workingTrail.bounded&&workingTrail.phaseStable&&workingTrail.active>=5&&workingTrail.quiet>=5&&workingTrail.uniquePaths>=6,workingTrail)
     const workingShot = await cdp.send('Page.captureScreenshot', { format: 'png' })
     fs.writeFileSync(path.join(OUT, 'working-sidebar.png'), Buffer.from(workingShot.data, 'base64'))
 
@@ -485,30 +464,71 @@ async function main() {
     })()`)
     record(
       '头像就是 ' + BOT_SIZE + '×' + BOT_SIZE + '、不撑破格子',
-      Math.abs(layout.svg.w - BOT_SIZE) < 0.5 && Math.abs(layout.svg.h - BOT_SIZE) < 0.5,
+      Math.abs(layout.svg.w - BOT_SIZE) < 0.5 && Math.abs(layout.svg.h - BOT_SIZE) < 0.5 && layout.slot.h >= BOT_SIZE,
       layout,
     )
 
+    const scheduleLayout = await evaluate(`(() => {
+      const row = document.querySelector('[data-row-key="session:p-working"]')
+      const group = row.closest('.JoiKIa_groupSection'), results = []
+      for (const width of [280,180]) {
+        group.style.width = width + 'px'
+        const a=row.querySelector('svg.dsgb').getBoundingClientRect(), c=row.querySelector('[data-session-schedule-mark]').getBoundingClientRect()
+        const title=row.querySelector('.Kx9_title').getBoundingClientRect(), r=row.getBoundingClientRect()
+        results.push({width,rowHeight:r.height,avatar:a.width,clock:c.width,vertical:a.top>=r.top && a.bottom<=r.bottom,clockGap:c.left-a.right,titleGap:title.left-c.right,titleWidth:title.width})
+      }
+      group.style.width = ''
+      return results
+    })()`)
+    record('24px 头像 + 16px 时钟：宽/窄侧栏并排、不压标题、行高仍是 32px',
+      scheduleLayout.every(r=>r.rowHeight===32&&r.avatar===24&&r.clock===16&&r.vertical&&r.clockGap>=2&&r.titleGap>=0&&r.titleWidth>0),scheduleLayout)
+
+    // Exercise folded events -> real HTTP state route -> built widget -> browser SVG.
+    // Both events precede the poll, so this catches the missing-short-call regression.
+    const toolIndex = SESSIONS.findIndex(row => row.id === 'p-working')
+    const originalToolRow = SESSIONS[toolIndex]
+    const shortRegistry = createRegistry()
+    shortRegistry.onEvent({id:'p-working'}, {type:'tool/call',data:{turn:1,callId:'short-command',name:'bash'}})
+    shortRegistry.onEvent({id:'p-working'}, {type:'tool/result',data:{turn:1,message:{source:{callId:'short-command'}}}})
+    SESSIONS[toolIndex] = shortRegistry.snapshot().sessions[0]
+    const shortTool = await evaluate(`(async () => {
+      const svg = document.querySelector('[data-row-key="session:p-working"] svg.dsgb')
+      let observed = false
+      for(let i=0;i<40;i++) {
+        if(svg.getAttribute('data-dsgb-cue')==='recent-tool'){observed=true;break}
+        await new Promise(r=>setTimeout(r,25))
+      }
+      const phase=svg.getAttribute('data-dsgb-phase'),motion=svg.getAttribute('data-dsgb-motion')
+      let paths=false
+      for(let i=0;i<10;i++) {
+        paths=paths||['trail-back','trail'].some(layer=>{
+          const g=svg.querySelector('[data-dsgb-layer="'+layer+'"]')
+          return getComputedStyle(g).display!=='none'&&Array.from(g.children).some(p=>!!p.getAttribute('d'))
+        })
+        await new Promise(r=>setTimeout(r,25))
+      }
+      await new Promise(r=>setTimeout(r,900))
+      return {observed,phase,motion,paths,after:svg.getAttribute('data-dsgb-motion'),cueAfter:svg.getAttribute('data-dsgb-cue')}
+    })()`)
+    record('短命令事件 → HTTP → 实际 bundle：提示一次、有彩带、到期回思考且不虚报相位',
+      shortTool.observed&&shortTool.phase==='thinking'&&shortTool.motion==='spin'&&shortTool.paths&&shortTool.after==='tri-dot'&&shortTool.cueAfter==='',shortTool)
+    SESSIONS[toolIndex] = originalToolRow
+
     // 真实帧推进 + 同态快照不重播
     const motion = await evaluate(`(async () => {
-      const row = document.querySelector('[data-row-key="session:p-done"]')
-      const svg = row.querySelector('svg.dsgb')
-      const snap = () => {
-        const g = svg.querySelector('[data-dsgb-layer="orbits-front"]')
-        return g === null || g.children.length === 0 ? '' : g.children[0].getAttribute('d')
+      const svg=document.querySelector('[data-row-key="session:p-done"] svg.dsgb')
+      const before=svg.getAttribute('data-dsgb-frame'),samples=[]
+      for(let i=0;i<12;i++){
+        if(i===6)window.__dshGrokBuddy.sync()
+        await new Promise(r=>setTimeout(r,150))
+        const pose=svg.querySelector('[data-dsgb-layer="avatar"]').getAttribute('transform')
+        const paths=Array.from(svg.querySelectorAll('[data-dsgb-layer="orbits-front"] path')).map(p=>p.getAttribute('d')).join('|')
+        samples.push(pose+'|'+paths)
       }
-      const a = snap()
-      await new Promise((r) => setTimeout(r, 400))
-      const b = snap()
-      // 同态快照：直接调一次 sync，动作 id 不变，时间轴不该重置
-      const before = svg.getAttribute('data-dsgb-frame')
-      window.__dshGrokBuddy.sync()
-      await new Promise((r) => setTimeout(r, 300))
-      const c = snap()
-      return { moved: a !== b, continued: b !== c, frame: before }
+      return {moved:new Set(samples.slice(0,6)).size>1,continued:new Set(samples.slice(6)).size>1,frame:before}
     })()`)
-    record('done 的轨道在真实帧里推进', motion.moved === true, motion)
-    record('同态快照不重启动画（继续推进）', motion.continued === true, motion)
+    record('done 的完整动作在真实帧里推进（含减速回正）',motion.moved,motion)
+    record('同态快照不重启动画（继续推进）',motion.continued,motion)
 
     // 无障碍标签与六态一致
     const aria = await evaluate(`(() => {

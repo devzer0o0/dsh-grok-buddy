@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>侧栏真实尺寸：16px vs 20px</title><style>
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>侧栏真实尺寸：20px vs 24px</title><style>
  body{margin:0;padding:22px 24px 26px;background:#15171c;color:#e8e8ea;font:13px/1.55 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
  h1{font-size:15px;font-weight:600;margin:0 0 5px;color:#f0f1f3}
  .sub{font-size:12px;color:#8b93a1;margin:0 0 16px;max-width:820px}
@@ -13,21 +13,21 @@
  .note{font-size:11px;color:#7b8494;margin:12px 0 0;max-width:880px;line-height:1.65}
  code{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;color:#c9cdd6}
 </style></head><body>
-<h1>同一套渲染器，只改尺寸：16px（宿主原生状态点）对比 20px（现在）</h1>
-<p class="sub">截图是真实浏览器渲染（设备像素比 2），不是把预览放大冒充「看得清」。20px 恰好等于宿主前导位高度，行高 32px 不撑破。</p>
+<h1>同一套渲染器，只改尺寸：20px（此前画布）对比 24px（现在）</h1>
+<p class="sub">按真实 CSS 尺寸在浏览器中渲染；文档截图为阅读方便放大，不是 DSH 实机截图。24px 画布中的本体是 16px；前导位同步扩展，32px 行高不变。</p>
 <div class="panes">
-  <div class="side" id="p16"><div class="head">16px · 旧尺寸</div></div>
-  <div class="side" id="p20"><div class="head">20px · 现在（BOT_SIZE）</div></div>
+  <div class="side" id="p20"><div class="head">20px · 此前尺寸</div></div>
+  <div class="side" id="p24"><div class="head">24px · 现在（BOT_SIZE）</div></div>
 </div>
 <p class="note">
-  差别全在最难认的两态：<strong>blocked 的感叹号竖条</strong>与<strong>thinking 的三颗点</strong>。
-  16px 下竖条约 1.0 CSS px、三点几乎撑满图标；20px 下单点 3.7–4.5 CSS px，三点整体 15.5 px，
-  才分得清「感叹号」和「三颗点」。量测见 <code>docs/motion-spec.md</code>。
+  画布边长放大 <strong>20%</strong>，本体从约 13.3px 增至 16px；彩带与眼睛同步等比放大。
+  24px 下思考单点约 4.5–5.4 CSS px，仍不溢出画布。这里只展示静态代表帧；动态循环另见预览页。
 </p>
 <script type="module">
 import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
 import { createBot, runBot } from '../src/grokbot/engine.js'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
+import { BOT_SIZE } from '../src/widget/styles.js'
 
 const INK = '#1084fe'
 const SURFACE = '#1b1d22'
@@ -40,13 +40,13 @@ const ITEMS = [
   ['done', '完成 · 刚干完'],
 ]
 
-for (const [pane, size] of [[document.getElementById('p16'), 16], [document.getElementById('p20'), 20]]) {
+for (const [pane, size] of [[document.getElementById('p20'), 20], [document.getElementById('p24'), BOT_SIZE]]) {
   for (const [phase, text] of ITEMS) {
     const row = document.createElement('div')
     row.className = 'row'
     const slot = document.createElement('span')
     slot.className = 'slot'
-    slot.style.width = size + 'px'
+    slot.style.width = slot.style.height = size + 'px'
     const inst = createBot({ shape: TB_SHAPES.blob, expressions: TB_EXPRESSIONS, bodyFill: INK, eyeFill: SURFACE, size })
     inst.state = PHASE_TO_MOTION[phase]
     slot.appendChild(inst.svg)
@@ -61,6 +61,6 @@ for (const [pane, size] of [[document.getElementById('p16'), 16], [document.getE
     pane.appendChild(row)
   }
 }
-document.querySelector('#p20 .row').classList.add('on')
+document.querySelector('#p24 .row').classList.add('on')
 </script>
 </body></html>

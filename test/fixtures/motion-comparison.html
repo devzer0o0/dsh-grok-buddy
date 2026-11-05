@@ -1,0 +1,63 @@
+<!doctype html><meta charset="utf-8"><title>Official motion reference comparison</title>
+<style>
+body { margin:24px;background:#191b19;color:#eee;font:14px system-ui } h1{font-size:20px} .row{display:flex;align-items:center;gap:18px;margin:12px 0} .label{width:160px} .cell{display:inline-flex;flex-direction:column;align-items:center} svg{overflow:visible} .hint{color:#aaa;font-size:12px}
+</style>
+<h1>Official reference / Product renderer</h1><p class="hint">Same native time, seed and scale · left: independent upstream capture · middle: product · right: amplified pixel difference</p><div id="frames"></div>
+<script type="module">
+import { createBot, paintFrame } from '/src/grokbot/engine.js'
+import { sampleFrame } from '/src/grokbot/motion.js'
+import { TB_EXPRESSIONS, TB_SHAPES } from '/src/grokbot/data.js'
+const fixture = await (await fetch('/test/fixtures/motion-reference.json')).json()
+const ns='http://www.w3.org/2000/svg', C=114.2705, scale=105/C
+let sequence=0
+const node=(tag,attrs={})=>{const e=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);return e}
+function reference(frame,size=128,ink='#fff',paper='#191b19'){
+ const id='oracle-'+sequence++,svg=node('svg',{width:size,height:size,viewBox:'0 0 315 315'})
+ const root=node('g',{transform:`translate(157.5 157.5) scale(${scale}) translate(${-C} ${-C})`}),defs=node('defs'),clip=node('clipPath',{id})
+ clip.append(node('path',{d:fixture.bodyPath}));defs.append(clip);svg.append(defs,root)
+ const back=node('g'),avatar=node('g',{transform:frame.pose}),front=node('g');root.append(back,avatar,front)
+ avatar.append(node('path',{d:fixture.bodyPath,fill:ink}));const eyes=node('g',{'clip-path':`url(#${id})`});avatar.append(eyes)
+ for(const eye of frame.eyes)if(eye.visible)eyes.append(node('path',{d:eye.d,transform:eye.transform,fill:paper}))
+ frame.ribbons.forEach((r,i)=>{
+  const gid=id+'-g-'+i,g=node('linearGradient',{id:gid,gradientUnits:'userSpaceOnUse',x1:r.x1,y1:r.y1,x2:r.x2,y2:r.y2})
+  r.colors.forEach((c,j)=>g.append(node('stop',{offset:j/4,'stop-color':c})));defs.append(g)
+  ;[back,front].forEach((el,j)=>el.append(node('path',{d:r.paths[j].d||'',fill:`url(#${gid})`,opacity:r.paths[j].alpha,stroke:'none'})))
+ });return svg
+}
+function product(motion,t,size=128,ink='#fff',paper='#191b19',referenceTiming=false){
+ const inst=createBot({shape:TB_SHAPES.blob,expressions:TB_EXPRESSIONS,bodyFill:ink,eyeFill:paper,size})
+ inst.state=motion;paintFrame(inst,sampleFrame(motion,t,{size,referenceTiming}));return inst.svg
+}
+async function raster(svg,size=256){
+ const canvas=document.createElement('canvas');canvas.width=canvas.height=size
+ const ctx=canvas.getContext('2d');ctx.fillStyle='#191b19';ctx.fillRect(0,0,size,size)
+ const image=new Image();image.src='data:image/svg+xml;base64,'+btoa(new XMLSerializer().serializeToString(svg));await image.decode();ctx.drawImage(image,0,0,size,size)
+ return {canvas,data:ctx.getImageData(0,0,size,size)}
+}
+window.compareAll=async()=>{
+ const results=[],container=document.getElementById('frames');container.replaceChildren()
+ for(const clip of fixture.clips)for(const frame of clip.frames){
+  // The loop's last 200ms is deliberately bridged; compare the authored part only.
+  if(frame.time>=(clip.state==='working'?4400:6000))continue
+  const motion=clip.state==='working'?'spin':'orbit',a=reference(frame),b=product(motion,frame.time,128,'#fff','#191b19',true)
+  const ra=await raster(a),rb=await raster(b),diff=document.createElement('canvas');diff.width=diff.height=256
+  const dc=diff.getContext('2d'),di=dc.createImageData(256,256)
+  let sum=0,changed=0,max=0
+  for(let i=0;i<ra.data.data.length;i+=4){let local=0;for(let c=0;c<3;c++){const delta=Math.abs(ra.data.data[i+c]-rb.data.data[i+c]);sum+=delta;max=Math.max(max,delta);local=Math.max(local,delta);di.data[i+c]=Math.min(delta*8,255)}if(local>8)changed++;di.data[i+3]=255}
+  dc.putImageData(di,0,0);diff.style.width=diff.style.height='128px'
+  const mae=sum/(256*256*3),changedRatio=changed/(256*256);results.push({motion,time:frame.time,mae,changedRatio,max,pass:mae<.08&&changedRatio<.002})
+  if([800,2000,2400,3200,4000].some(t=>Math.abs(t-frame.time)<1)){
+   const row=document.createElement('div');row.className='row';row.innerHTML=`<div class="label">${clip.state} · ${Math.round(frame.time)} ms<br>MAE ${mae.toFixed(4)}</div>`;row.append(a,b,diff);container.append(row)
+  }
+ }
+ return results
+}
+window.motionDemo=(motion,t)=>{
+ document.querySelector('h1').textContent=(motion==='spin'?'working · 正在处理':'done · 完成')+' — product renderer'
+ document.querySelector('.hint').textContent='128 / 64 / 32 / 24 / 20 / 16 CSS px · 24px = sidebar size'
+ const root=document.getElementById('frames');root.replaceChildren();const row=document.createElement('div');row.className='row';row.style.gap='26px'
+ for(const size of [128,64,32,24,20,16]){const cell=document.createElement('div');cell.className='cell';cell.append(product(motion,t,size));const label=document.createElement('p');label.textContent=size+' px';cell.append(label);row.append(cell)}root.append(row)
+ return {x:0,y:0,width:580,height:260,scale:1}
+}
+window.comparisonReady=true
+</script>

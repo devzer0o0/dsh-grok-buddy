@@ -82,13 +82,13 @@
   </div>
 </div>
 
-<h2>四档真实尺寸（20px 是侧栏里的验收主体）</h2>
+<h2>五档真实尺寸（24px 是侧栏里的验收主体）</h2>
 <div class="panel">
   <div class="row" id="sizes"></div>
   <p class="hint">
-    64px 看轨迹与层次，32px 看缩放是否合理，20px 是侧栏里真正挂出去的尺寸，
-    16px 留作对照（原生状态点尺寸，感叹号与三点在这里确实偏小）。
-    画布是 1.5× 身体直径，轨道收在里面，所以 20px 下也不会被格子裁掉。
+    64px 看轨迹与层次，32px 看缩放是否合理，24px 是侧栏里真正挂出去的尺寸，
+    20px 留作放大前对照，16px 留作兼容对照（原生状态点尺寸，感叹号与三点在这里确实偏小）。
+    画布是 1.5× 身体直径，轨道收在里面，所以 24px 下也不会被格子裁掉。
   </p>
 </div>
 
@@ -185,7 +185,9 @@ function spawn(holder, size, motion, opts) {
     reduced: o.reduce === true,
     // 预览自己掌控时钟：暂停就是真的不推进，步进就是精确跳一段时间
     now: () => t,
-    raf: (cb) => (o.reduce === true ? 0 : requestAnimationFrame(cb)),
+    // Only the preview's master clock advances these handles. A second RAF here
+    // would mix performance.now() with the seekable preview time and corrupt poses.
+    raf: () => 0,
     cancelRaf: (id) => { if (id) cancelAnimationFrame(id) },
   })
   const record = { inst, handle, motion, holder, size, reduce: o.reduce === true, get t() { return t }, set t(v) { t = v } }
@@ -247,10 +249,10 @@ function rebuild() {
   stageHero.textContent = ''
   spawn(stageHero, 200, motion, { reduce: state.reduced })
 
-  // 三档尺寸
+  // 五档尺寸
   sizesRow.textContent = ''
-  // 20 才是侧栏里的真实尺寸（BOT_SIZE）；16 留着对照原生状态点，看清放大前后的差别。
-  for (const size of [64, 32, 20, 16]) {
+  // 24 才是侧栏里的真实尺寸（BOT_SIZE）；16 留着对照原生状态点，看清放大前后的差别。
+  for (const size of [64, 32, 24, 20, 16]) {
     const cell = document.createElement('div')
     cell.className = 'cell'
     const box = document.createElement('div')
@@ -426,11 +428,11 @@ const specTable = document.getElementById('specTable')
 const ROWS = [
   ['动作', '图形', '进入', '持续 / 循环', '关键量测'],
   ['rest / idle', '头像 + 竖眼', '—', '慢张望 5.6s、眨眼 4.8s', '眼对中点 -0.25D..+0.15D'],
-  ['spin / working', '头像 + 持续绕行彩带', '甩头 760ms，彩带 280ms 入场', '单弧 2.2s/圈；张望 2.6s', '半径 0.59D、宽 0.12D（侧栏可读性调整）'],
+  ['spin / working', '完整转身 + 渐变开放尾迹', '原版弹簧加速，按转速发射', '完整表演 4.6s 循环', '单平面 3–5 条变宽尾迹；前后遮挡'],
   ['half-lidded / waiting', '头像 + 横线眼', '420ms', '呼吸 4.2s', '眼 0.175D×0.065D，倾角 +12°/+14°'],
   ['bang / blocked', '感叹号', '480ms 收缩形变', '完全静止（参考逐帧一致）', '条 0.146D、点 0.121D、间距 0.16D'],
   ['tri-dot / thinking', '三颗横点', '320ms 摊开', '脉动 1.4s，相位差 1/3', '点径 0.28D、间距 0.44D（侧栏调整；量测 0.165D / 0.272D）'],
-  ['orbit / done', '头像 + 6 条轨道', '420ms 长回', '持续，轨道 6 种速度/倾角', '半径 0.58–0.70D、线宽 0.068D'],
+  ['orbit / done', '九圈转头 + 三圈翻滚 + 渐变尾迹', '140ms 后启动蓄力/加速', '完整庆祝 6.2s 循环', '三平面 9 条开放尾迹，减速收短后再庆祝'],
 ]
 for (const [i, row] of ROWS.entries()) {
   const tr = document.createElement('tr')

@@ -11,7 +11,7 @@
  * 也是 16px）。原生实现只在该行 idle 时才画时钟，所以两者从不同框；我们顶掉状态点后，
  * 头像和时钟会同时出现，两个 16px 挤进一个 16px 盒子 → 溢出 → 时钟压到标题上。
  *
- * 所以格子改成**按内容撑开**：只剩头像时仍是 16px（与原布局逐像素对齐），
+ * 所以格子改成**按内容撑开**：只剩头像时与 BOT_SIZE 同宽，
  * 多出标记时并排摆放、留 2px 缝，标题顺延让位。
  *
  * @module dsh-grok-buddy/styles
@@ -24,13 +24,13 @@ export const CELL_GAP = 2
  * 头像边长（px）。
  *
  * 原来是 16（与 DSH 原生状态点逐像素同尺寸），实际在侧栏里太小、看不清感叹号
- * 与三点。改成 20 —— 正好等于宿主前导位的高度（.slot{height:20px}），
- * 行高 32px 也放得下，不会撑破行、也不会把标题挤出去。
+ * 与三点。画布从 20 放大到 24，本体从约 13.3px 放大到 16px；
+ * 同步扩大被标记的会话前导位高度，32px 行内上下仍各留 4px。
  *
  * 画布是 1.5× 身体直径，轨道与拖尾都收在里面，所以放大只是等比放大，
  * 不会溢出格子。
  */
-export const BOT_SIZE = 20
+export const BOT_SIZE = 24
 
 /**
  * 项目菜单项 + 调色板的样式。
@@ -109,7 +109,7 @@ export function folderInkStyles(folderAttr, inkVar) {
  *
  * @param {string} botClass 头像的类名。
  * @param {string} slotAttr 标记过前导位的属性名（不带括号）。
- * @param {number} size 头像边长（px），应与 DSH 原生格子同宽。
+ * @param {number} size 头像边长（px），前导位随之扩展但不改变宿主行高。
  * @param {{reduce?: boolean}} [options] reduced-motion 等选项。
  * @returns {string} CSS 文本。
  */
@@ -121,11 +121,11 @@ export function slotStyles(botClass, slotAttr, size, options) {
   const rules = [
     cell +
       '{position:relative;display:inline-flex;align-items:center;justify-content:flex-start;' +
-      'gap:' + CELL_GAP + 'px;width:auto;min-width:' + size + 'px;flex:none}',
+      'gap:' + CELL_GAP + 'px;width:auto;min-width:' + size + 'px;min-height:' + size + 'px;flex:none}',
     cell + ' > [data-state]{display:none!important}',
     cell + ' > [class*="visuallyHidden"]{display:none!important}',
     // order:-1 兜底：前导位里万一还有别的标记，头像也永远是最左那个。
-    // 轨道/拖尾要能画到头像本体之外，但又不能溢出 16px 格子去压标题：
+    // 轨道/拖尾要能画到头像本体之外，但不能溢出已扩展的格子去压标题：
     // 画布本身就是 1.5× 身体直径，轨迹已经收在里面，所以这里只要不裁切即可。
     bot + '{order:-1;display:block;width:' + size + 'px;height:' + size + 'px;flex:none;overflow:visible}',
   ]

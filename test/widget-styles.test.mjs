@@ -7,7 +7,7 @@
  *
  * 所以这里钉死三件事：
  *   1. 格子按内容撑开（width:auto），不再是定宽 16px —— 溢出从这里来
- *   2. 头像尺寸取自 BOT_SIZE（20px：等于宿主前导位高度，侧栏里能认出感叹号/三点）
+ *   2. 头像与前导位高度均为 24px（32px 行内上下各留 4px）
  *   3. 头像排最前（DOM 顺序 + order:-1 兜底），和原生状态点同位
  *
  * @module test/widget-styles.test
@@ -35,6 +35,7 @@ test('前导位按内容撑开，不再定宽 —— 多出的标记不会溢出
   assert.match(cell, /width:auto/, '格子必须 width:auto，否则第二只标记溢出')
   assert.doesNotMatch(cell, /[^-]width:16px/, '不能再把格子钉回定宽')
   assert.match(cell, new RegExp('min-width:' + SIZE + 'px'), '只剩头像时要保持头像的宽度')
+  assert.match(cell, /min-height:24px/, '不只放大 SVG，还要同步为画布留出高度')
   assert.match(cell, /display:inline-flex/)
   assert.match(cell, /flex:none/, '格子本身不能被行里的 flex 拉伸')
 })
@@ -50,8 +51,8 @@ test('头像尺寸取自 BOT_SIZE，且比原生 16px 状态点更大（可辨�
   assert.match(bot, new RegExp('height:' + SIZE + 'px'))
   assert.match(bot, /flex:none/)
   assert.ok(SIZE > 16, '16px 在侧栏里看不清，头像必须比原生状态点大')
-  // 宿主前导位高度 20px、会话行高 32px：不超过这两者就不会撑破布局。
-  assert.ok(SIZE <= 20, '不能超过宿主前导位高度（20px），否则行会被撑高')
+  assert.equal(SIZE, 24, '适度放大到 24px，不能悄悄退回过小的 20px')
+  assert.ok(SIZE <= 32 - 8, '会话行内上下至少各留 4px')
 })
 
 test('头像永远排在前导位最前面，和原生状态点同位', () => {

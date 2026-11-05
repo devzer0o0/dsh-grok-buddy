@@ -7,7 +7,7 @@
  *
  * 用法：
  *   node scripts/browser-check.mjs [--out /tmp/xxx] [--keep] [--working-frames]
- *   --working-frames 额外输出工作态真实尺寸的 PNG 帧序列（20fps，4.4s）
+ *   --working-frames 额外输出工作态真实尺寸的 PNG 帧序列（20fps，4.6s）
  *
  * 会做的事：
  *   1. 起一个临时静态服务器（只服务本仓库）
@@ -198,8 +198,10 @@ async function main() {
     // 1) 每态：图层结构 + 真实 SVG 几何
     for (const phase of ['idle', 'working', 'waiting', 'blocked', 'thinking', 'done']) {
       const info = await evaluate(`(async () => {
+        window.__preview.state.playing = false
         window.__preview.selectPhase(${JSON.stringify(phase)})
-        await new Promise((r) => setTimeout(r, 350))
+        // Working product entry is native t+1500; native 2350ms is product 850ms.
+        for (const r of window.__preview.live) { r.t = ${phase === 'working' ? 850 : phase === 'done' ? 1500 : 800}; r.handle.step(r.t) }
         const rec = window.__preview.live.find((x) => x.size === 200)
         const svg = rec.inst.svg
         const shown = (el) => {
@@ -234,7 +236,7 @@ async function main() {
       })()`)
       const expect = {
         idle: (i) => i.body && i.eyes && !i.bang && !i.dots,
-        working: (i) => i.body && i.eyes && !i.bang && !i.dots && i.trail === 5,
+        working: (i) => i.body && i.eyes && !i.bang && !i.dots && i.trail >= 3 && i.trail <= 5,
         waiting: (i) => i.body && i.eyes && !i.bang && !i.dots,
         blocked: (i) => i.bang && !i.body && !i.eyes && !i.dots,
         thinking: (i) => i.dots && i.dotCount === 3 && !i.body && !i.eyes,
@@ -252,8 +254,8 @@ async function main() {
     // 2) 16px 的真实布局矩形：不超出 16×16、不被裁切
     const layout = await evaluate(`(async () => {
       window.__preview.selectPhase('done')
-      await new Promise((r) => setTimeout(r, 300))
       const rec = window.__preview.live.find((x) => x.size === 16)
+      rec.handle.step(2000)
       const b = rec.inst.svg.getBoundingClientRect()
       const parent = rec.holder.getBoundingClientRect()
       const paths = Array.from(rec.inst.svg.querySelectorAll('[data-dsgb-layer="orbits-front"] path'))
@@ -280,6 +282,7 @@ async function main() {
     // 不把 viewBox 坐标当像素。跨一个完整脉动周期采样，量最小点径、最大点径、
     // 整体宽度与相邻边缘缝。
     const dotCheck = await evaluate(`(async () => {
+      window.__preview.state.playing = true
       window.__preview.selectPhase('thinking')
       await new Promise((r) => setTimeout(r, 450))
       const rec = window.__preview.live.find((x) => x.size === 16)
@@ -328,6 +331,7 @@ async function main() {
 
     // 3) 真实帧推进：同态不重播，动画确实在前移
     const animation = await evaluate(`(async () => {
+      window.__preview.state.playing = true
       window.__preview.selectPhase('done')
       await new Promise((r) => setTimeout(r, 400))
       const snap = () => {
@@ -378,92 +382,62 @@ async function main() {
     })()`)
     record('切换深浅背景后仍有可用实例与墨色', theme.sameInstance === true && typeof theme.ink === 'string', theme)
 
-    // working 的验收不能停在入场 350ms：旧版本 1.52s 后整道彩带永久消失。
-    // 用产品引擎的可控时钟画完多圈，并读取真实 SVG 路径、线宽和包含描边的矩形。
-    for (const themeName of ['Light', 'Dark']) {
-      const working = await evaluate(`(() => {
+    // Cover entire authored cycles, including growth, occlusion, retirement and recurrence.
+    // Never require every moment to look like a permanently lit five-band ring.
+    for (const themeName of ['Light', 'Dark']) for (const phase of ['working', 'done']) {
+      const samples = await evaluate(`(() => {
         document.getElementById('bg${themeName}').click()
-        window.__preview.selectPhase('working')
         window.__preview.state.playing = false
-        for (const rec of window.__preview.live) rec.handle.pause()
-        const sizes = [16, 20, 32, 64]
-        const result = []
-        for (const size of sizes) {
-          const rec = window.__preview.live.find((x) => x.size === size)
-          const svg = rec.inst.svg
-          const g = rec.inst.trailGroup
-          const rows = []
-          let initialNodes
-          let reused = true
-          const times = [1600, 30000, 60000]
-          for (let t = 5000; t <= 7200; t += 40) times.push(t)
-          for (const t of times) {
+        window.__preview.selectPhase('${phase}')
+        const period = ${phase === 'working' ? 4600 : 6200}
+        const maxNodes = ${phase === 'working' ? 4 : 9}
+        return [16,20,24,32,64].map(size => {
+          const rec = window.__preview.live.find(r => r.size === size), svg=rec.inst.svg
+          const groups = ${phase === 'working' ? '[rec.inst.trailBack,rec.inst.trailGroup]' : '[rec.inst.orbitsBack,rec.inst.orbitsFront]'}
+          rec.handle.step(${phase === 'working' ? 850 : 2350})
+          const nodes=groups.flatMap(g=>Array.from(g.children)), rows=[]
+          const times=Array.from({length:Math.ceil(period/25)},(_,i)=>i*25)
+          times.push(${phase === 'working' ? 850 : 2350}+period*10,${phase === 'working' ? 850 : 2350}+period*100)
+          let inside=true,reused=true,maxWidth=0
+          for(const t of times){
             rec.handle.step(t)
-            const canvas = svg.getBoundingClientRect()
-            const paths = Array.from(g.children)
-            if (initialNodes === undefined) initialNodes = paths
-            reused = reused && paths.length === initialNodes.length && paths.every((p, i) => p === initialNodes[i])
-            const shown = getComputedStyle(g).display !== 'none' && Number(getComputedStyle(g).opacity) >= 0.9
-            const geometry = paths.map((p) => {
-              const m = p.getScreenCTM()
-              const scale = Math.hypot(m.a, m.b)
-              const width = Number.parseFloat(getComputedStyle(p).strokeWidth) * scale
-              const b = p.getBoundingClientRect()
-              return {
-                width,
-                length: p.getTotalLength() * scale,
-                inside: b.left - width / 2 >= canvas.left && b.top - width / 2 >= canvas.top &&
-                  b.right + width / 2 <= canvas.right && b.bottom + width / 2 <= canvas.bottom,
-              }
-            })
-            rows.push({ shown, count: paths.length, geometry, d: paths.map((p) => p.getAttribute('d')).join('|') })
+            const canvas=svg.getBoundingClientRect()
+            const live=groups.flatMap(g=>getComputedStyle(g).display==='none'?[]:Array.from(g.children).filter(p=>p.getAttribute('d')))
+            for(const p of live){const b=p.getBoundingClientRect();inside=inside&&b.left>=canvas.left-.03&&b.top>=canvas.top-.03&&b.right<=canvas.right+.03&&b.bottom<=canvas.bottom+.03}
+            const now=groups.flatMap(g=>Array.from(g.children));reused=reused&&now.length<=maxNodes*2&&now.every((p,i)=>p===nodes[i])
+            maxWidth=Math.max(maxWidth,...(rec.inst.frame.${phase === 'working' ? 'trail' : 'orbits'}.rings.map(r=>r.width*${105 / 114.2705}*size/315)),0)
+            rows.push({active:live.length>0,d:live.map(p=>p.getAttribute('d')).join('|')})
           }
-          result.push({
-            size, samples: rows.length, reused,
-            visible: rows.every((r) => r.shown && r.count === 5),
-            minWidth: Math.min(...rows.flatMap((r) => r.geometry.map((p) => p.width))),
-            minLength: Math.min(...rows.flatMap((r) => r.geometry.map((p) => p.length))),
-            inside: rows.every((r) => r.geometry.every((p) => p.inside)),
-            uniquePaths: new Set(rows.map((r) => r.d)).size,
-          })
-        }
-        // 截图固定在入场已结束的 5s：只看入场会掩盖本次缺陷。
-        for (const rec of window.__preview.live) rec.handle.step(5000)
-        return result
+          rec.handle.step(${phase === 'working' ? 850 : 2350})
+          return {size,inside,reused,maxWidth,active:rows.filter(r=>r.active).length,quiet:rows.filter(r=>!r.active).length,recurs:rows.slice(-2).every(r=>r.active),uniquePaths:new Set(rows.map(r=>r.d)).size}
+        })
       })()`)
-      for (const sample of working) {
-        record(
-          'working ' + themeName + ' ' + sample.size + 'px：60s 仍可见、五条完整彩带、绕行且不裁切',
-          sample.visible && sample.inside && sample.reused && sample.uniquePaths >= 20 &&
-            sample.minWidth >= sample.size * 0.022 && sample.minLength >= sample.size * 0.6,
-          sample,
-        )
-      }
+      for (const sample of samples) record(phase + ' ' + themeName + ' ' + sample.size + 'px：完整尾迹生长/退场/复现、节点复用且不裁切',
+        sample.inside && sample.reused && sample.recurs && sample.active > 20 && sample.quiet > 10 && sample.uniquePaths > 20 && sample.maxWidth > .7, sample)
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
-      const file = path.join(OUT_DIR, 'working-steady-' + themeName.toLowerCase() + '.png')
-      fs.writeFileSync(file, Buffer.from(shot.data, 'base64'))
-      report.screenshots.push(file)
+      const file=path.join(OUT_DIR,phase+'-'+themeName.toLowerCase()+'.png');fs.writeFileSync(file,Buffer.from(shot.data,'base64'));report.screenshots.push(file)
     }
 
     if (process.argv.includes('--working-frames')) {
+      await evaluate(`(() => {window.__preview.selectPhase('working'); window.__preview.state.playing=false})()`)
       const frameDir = path.join(OUT_DIR, 'working-frames')
       fs.mkdirSync(frameDir, { recursive: true })
       const clip = await evaluate(`(() => {
         const panel = document.getElementById('sizes').closest('.panel')
         panel.style.width = '600px'
-        panel.querySelector('.hint').textContent = '64 / 32 / 20 / 16 CSS px · 20px 为当前侧栏尺寸 · 彩带持续绕行 2.2s/圈'
-        panel.previousElementSibling.textContent = 'working · 工作超过 5 秒后（产品渲染器）'
+        panel.querySelector('.hint').textContent = '64 / 32 / 24 / 20 / 16 CSS px · 24px 为当前侧栏尺寸 · 原版完整转身与渐变尾迹'
+        panel.previousElementSibling.textContent = 'working · 完整原版表演（产品渲染器）'
         const b = panel.getBoundingClientRect()
         return { x: b.x, y: b.y - 32, width: b.width, height: b.height + 40, scale: 1 / devicePixelRatio }
       })()`)
-      for (let i = 0; i < 88; i++) {
+      for (let i = 0; i < 92; i++) {
         await evaluate(`(() => {
-          for (const rec of window.__preview.live) rec.handle.step(${5000 + i * 50})
+          for (const rec of window.__preview.live) rec.handle.step(${i * 50})
         })()`)
         const shot = await cdp.send('Page.captureScreenshot', { format: 'png', clip })
         fs.writeFileSync(path.join(frameDir, String(i).padStart(3, '0') + '.png'), Buffer.from(shot.data, 'base64'))
       }
-      report.workingFrames = { directory: frameDir, fps: 20, frames: 88, source: 'product renderer, t=5000..9350ms' }
+      report.workingFrames = { directory: frameDir, fps: 20, frames: 92, source: 'product renderer, t=0..4550ms' }
     }
 
     cdp.close()

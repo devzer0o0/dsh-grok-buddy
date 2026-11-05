@@ -70,17 +70,16 @@ Grok Bot 的设计文章把这件事讲得很清楚：他们要解决的不是�
 > how much of the lifecycle the avatar itself could carry.
 
 所以这里也照做：**不新增任何 UI 元素**，只把侧栏原本那个彩色小圆点换成一个会呼吸的头像。
-位置、行高全都不变，尺寸从宿主原生状态点的 16px 放大到 **20px**（等于宿主前导位高度）。
-
-为什么不是 16px —— 因为 16px 下根本分不清：
+会话行高保持 32px，头像画布从 20px 适度放大到 **24px**（边长增加 20%）。
+画布包含彩带的安全边距，因此头像本体从约 **13.3px 增至 16px**，不是把彩带裁掉来放大脸。
+前导位同步扩展；有定时任务时钟时按「24px 头像 + 2px 间隔 + 16px 时钟」并排，标题顺延。
 
 <p align="center">
-  <img src="./docs/size-compare.png" width="820" alt="16px 与 20px 并排：16px 下感叹号竖条约 1 CSS px、三点几乎撑满图标，20px 下才分得清">
+  <img src="./docs/size-compare.png" width="820" alt="同一渲染器 20px 与 24px 对照：本体、眼睛和彩带等比放大，行高不变">
 </p>
 
-16px 下感叹号竖条约 **1.0 CSS px**、三颗点几乎撑满图标，两种形态糊成一团；
-20px 下单点 3.7–4.5 CSS px、三点整体 15.5 px，才分得清「感叹号」和「三颗点」。
-20px 也正好等于宿主前导位高度（`.slot{height:20px}`），会话行高 32px 仍放得下，不撑破行。
+24px 下思考单点约 4.5–5.4 CSS px；彩带保留官网小尺寸加粗与前后遮挡。
+原生项目文件夹仍是 16px，不受会话头像尺寸调整影响。
 
 ## 三层分开：状态 / 动作 / 表情
 
@@ -362,26 +361,33 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 | 状态 | 动作 | 画的是什么 |
 | --- | --- | --- |
 | idle | `rest` | 圆头像 + 竖眼；每 6.4 s 一次「看一眼再停住」的慢转头，4.8 s 眨眼一次 |
-| working | `spin` | 圆头像；进入时甩一下头，随后持续左右张望；**一道五色并排弧带持续绕行，2.2 s 一圈**，不会在入场结束后消失；20px 下彩带总厚度 1.6 CSS px |
+| working | `spin` | 官方完整球面转身；单平面渐变开放尾迹随转速生长、前后穿插、收短；完整表演每 4.6 s 循环 |
 | waiting | `half-lidded` | 圆头像 + 压扁上翘的横线眼（0.175D×0.065D，+12°/+14°），低活动度呼吸 |
 | blocked | `bang` | **头像退出**，主体是感叹号：上方圆头长条（顶宽 0.146D、上宽下窄）+ 下方圆点（0.121D），稳态完全静止 |
-| thinking | `tri-dot` | **头像退出**，三颗横排圆点依次脉动：周期 1.4 s、相位差 1/3；点径/间距按侧栏可读性放大（0.28D / 0.44D，20px 下单点 3.7–4.5 px） |
-| done | `orbit` | 头像长回来并缓慢转动，6 条不同倾角/方向的彩色轨道环绕，按深度分成头像**身后**与**身前**两层，形成绕行遮挡 |
+| thinking | `tri-dot` | **头像退出**，三颗横排圆点依次脉动：周期 1.4 s、相位差 1/3；点径/间距按侧栏可读性放大（0.28D / 0.44D，24px 下单点 4.5–5.4 px） |
+| done | `orbit` | 官方九圈转头 + 三圈翻滚，三平面九条渐变开放尾迹；加速、减速回正并自然收尾，每 6.2 s 循环完整庆祝 |
 
 这四条是硬要求，也是验收时要看的：
 
 * **blocked 必须是感叹号**，不是「两个圆眼睛不眨眼」；
 * **thinking 必须是三点脉动**，不是「斜眼思考脸」；
-* **done 必须有环绕轨道**，不是「笑眼 + 更快的眨眼」；
-* **working 必须有转身与持续绕行的彩色短弧**，不是「换脸更快」或只播一次入场。
+* **done 必须有立体渐变尾迹与翻滚**，不是「笑眼 + 更快的眨眼」；
+* **working 必须有完整转身与重复出现的渐变开放尾迹**，不是「换脸更快」或只播一次入场。
 
-工作彩带的持续循环与加粗是针对侧栏小尺寸可见性的产品调整（2026-11-05），
-并非声称参考 GIF 展示了持续循环；保留单道弧带形态，与 done 的多条交叉轨道区分。
+working / done 已按官网实际渲染器重建，删除早期手调的同心彩虹弧和六个椭圆。
+验证采用独立采集的官方眼型、投影、带状路径与渐变数据，再经过 Chrome 像素对比。
+循环适配、随机初态与精确范围见 [动作规格](docs/motion-spec.md)；不把演示结束等同于退出 done。
 
-![working 持续绕行：64、32、20、16 CSS px](./docs/working-motion-loop.gif)
+**命令/工具触发与短调用**：宿主真实 `tool/call → tool/result` 事件统一覆盖 bash、命令执行及普通/MCP 工具，不按工具名称白名单筛选；有并发工具未结束时仍为 working，模型吐字不覆盖它。挂起审批/提问仍优先 waiting，明确终局优先 done/blocked/idle。
 
-上图为产品渲染器运行到第 5 秒后的浏览器采样，非真实 DSH 安装验收；
-20px 是当前侧栏尺寸。它不是产品运行时使用的 GIF 贴图。
+working 的播放起点向原生时间轴前移 1500ms（不改变转身速度与几何），进入约 200ms 已出现彩带。
+500ms 轮询可能漏过短调用，因此快照保留最近一次真实调用的去重证据：只在当前仍是 thinking/working、同轮、证据不超过 1500ms 时补一段 650ms 动效。**这是动效提示，不把已结束的工具伪报为仍在执行**：`data-dsgb-phase` 与读屏语义不变，`data-dsgb-cue="recent-tool"` 标记提示。同次轮询不续期；等待/终局、后台或 reduced-motion 不补播。已经结束整轮的任务不为了补播旧工具而推迟完成动画。
+
+![working：原版完整转身与渐变尾迹](./docs/working-motion-loop.gif)
+![done：原版翻滚、开放尾迹与减速回正](./docs/done-motion-loop.gif)
+
+以上是产品渲染器逐帧采样，不是运行时使用的 GIF 贴图，也不代表真实 DSH 安装验收。
+24px 是当前侧栏尺寸，20px 为放大前对照，16px 为兼容展示；未把静态测试全绿当作目标宿主已更新。
 
 颜色仍然只表示项目身份：六态同色。轨道与拖尾是参考动画里明确存在的**特效层**，
 保留多色；头像、感叹号、思考点的基础墨色仍是项目色（思考点的明暗是同一色的透明度）。
@@ -415,7 +421,7 @@ node scripts/bundle-check.mjs     # 真 Chrome 里跑**构建产物** lib/widget
 ```
 
 `browser-check.mjs` 起一个真的 Chrome（headless、零依赖 CDP），在真实 SVG 上核对图层构成、
-20px 布局矩形、轨道是否被裁、帧是否真的在推进、同态快照是否误重启动画、reduced-motion
+24px 布局矩形、轨道是否被裁、帧是否真的在推进、同态快照是否误重启动画、reduced-motion
 是否真的不跑帧，并输出截图。
 
 `bundle-check.mjs` 更进一步：它在真浏览器里加载**构建产物** `lib/widget.js`
@@ -425,7 +431,7 @@ node scripts/bundle-check.mjs     # 真 Chrome 里跑**构建产物** lib/widget
 
 ```bash
 node scripts/doc-shots.mjs                       # docs/states.png、states-64/20.png、faces.png
-node scripts/doc-size-compare.mjs                # docs/size-compare.png（16px vs 20px）
+node scripts/doc-size-compare.mjs                # docs/size-compare.png（20px vs 24px）
 node scripts/doc-motion-gif.mjs                  # docs/effect.gif（逐帧抓真动画）
 node scripts/doc-shot.mjs <页> <图> [选择器]       # 通用：重截任意 docs 页
 node scripts/doc-shot.mjs docs/hero.html docs/hero.png --width=980 --height=620
@@ -582,8 +588,8 @@ stopCode / stopTurnKey`。校验只有一处实现（[src/decision.js](src/decis
 
 页面半侧（[src/widget/](src/widget/) → 构建成 `lib/widget.js`）：
 
-* 轮询 state.json，在侧栏会话行的前导位里放一只头像（`BOT_SIZE`，现为 20px）
-* 状态位改成**按内容撑开**（只剩头像时就是 20px 宽）：DSH 会往同一格再塞自己的标记
+* 轮询 state.json，在侧栏会话行的前导位里放一只头像（`BOT_SIZE`，现为 24px）
+* 状态位改成**按内容撑开**（只剩头像时就是 24px 宽）：DSH 会往同一格再塞自己的标记
   （例如定时任务的时钟，16px），定宽格子必然溢出、时钟压到标题上
 * 头像实例按 DOM 槽位索引；同一槽位被复用于另一个会话时**重新绑定身份**
 * 节点离开 DOM 后动画会停，挂回来时重新起循环（不是留守静止 SVG）
@@ -644,7 +650,7 @@ node --test "test/*.test.mjs"     # 单元 / 决策 / 路由 / 构建产物集�
   三层要分别核验（见「刷新、重启与验收」）。
 * 兜底完成周期的 `generation` 是页面内存计数，**跨重启严格去重不成立**。
 * `prefers-reduced-motion` 的静态姿态只保证六态在素材层可区分；
-  侧栏里（20px）的可辨识度以真实截评为准，不以放大预览为准。
+  侧栏里（24px）的可辨识度以真实截评为准，不以放大预览为准。
 
 ## 致谢与许可
 

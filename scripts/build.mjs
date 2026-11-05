@@ -49,6 +49,8 @@ function load(file) {
 const modules = [
   path.join(SRC, 'decision.js'),
   path.join(SRC, 'grokbot', 'data.js'),
+  path.join(SRC, 'grokbot', 'reference-geometry.js'),
+  path.join(SRC, 'grokbot', 'reference-motion.js'),
   path.join(SRC, 'grokbot', 'motion.js'),
   path.join(SRC, 'grokbot', 'engine.js'),
   path.join(SRC, 'colors-shared.js'),
@@ -58,6 +60,7 @@ const modules = [
   path.join(SRC, 'widget', 'dsh-state.js'),
   path.join(SRC, 'widget', 'activity.js'),
   path.join(SRC, 'widget', 'celebrate.js'),
+  path.join(SRC, 'widget', 'tool-cue.js'),
   path.join(SRC, 'widget', 'styles.js'),
   path.join(SRC, 'widget', 'index.js'),
 ]

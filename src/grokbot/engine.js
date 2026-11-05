@@ -1,3 +1,5 @@
+import { REFERENCE_BODY_PATH, REFERENCE_SCALE, ribbonOutline } from './reference-motion.js'
+
 /**
  * GrokBot 头像渲染引擎（浏览器侧）—— **动作帧 → SVG** 的唯一实现。
  *
@@ -7,7 +9,7 @@
  *
  * 为什么重写：参考录屏里的六态**不只是换眼型** —— blocked 是头像收成感叹号，
  * thinking 是头像消失后三颗点脉动，done 是头像 + 多条前后穿插的彩色轨道，
- * working 是转头与彩色弧带（现按侧栏可读性要求持续绕行）。旧引擎只有
+ * working 是转头与彩色弧带（完整转身后自然收短、按表演循环）。旧引擎只有
  * 「圆脸 + 两只眼睛」一种模型，
  * 无论怎么调表情池都表达不出来。这里补上了符号层、轨道层、拖尾层与进入/退出
  * 所需的缩放与透明度。
@@ -17,7 +19,7 @@
  * 「眼睛贴在球面上、按经度透视压缩、转到背面消失」的投影模型 ——
  * idle / working / done 仍然用它们画眼睛。
  *
- * 图层顺序（从下到上）：后景轨道 → 身体 → 眼睛 → 前景轨道 → 拖尾 → 符号。
+ * 图层顺序（从下到上）：后景尾迹 → 身体/眼睛（同一姿态组）→ 前景尾迹 → 符号。
  * 轨道必须能同时出现在头像前后两层，否则「绕行、遮挡」就退化成贴在脸上的彩线。
  *
  * @module dsh-grok-buddy/grokbot
@@ -27,9 +29,7 @@ import {
   BOT_CENTER,
   MOTION_SPEC,
   blendFrames,
-  orbitPoints,
   sampleFrame,
-  trailBands,
   transitionOf,
 } from './motion.js'
 
@@ -41,13 +41,9 @@ const VIEWBOX = 210 * COMPOSE
 const INSET = VIEWBOX / 2 - FACE_CENTER
 
 /**
- * 动作 → 素材眼环下标。
- *
- * 参考里 idle / working / done 都是**同一副竖眼**，差异全在转头、视线与轨道 ——
- * 所以这三个动作共用素材的第 0 号眼型，不做「换脸」。这正是旧实现的错误所在：
- * 它靠换素材眼型来表达状态，而参考里脸一直没换，变的是动作。
- * waiting / blocked / thinking 根本不用素材眼型（分别是横线眼、感叹号、三点）。
- * 素材只提供眼型的几何 —— 它**不是**六态动画的实现。
+ * 默认眼环仅用于 rest 以及未提供投影眼环的兼容输入。
+ * working / done 的眼型、眨眼和球面投影由 reference-motion.js 完整输出，
+ * 渲染器不能再次投影或替换为固定第 0 号表情。
  */
 const MATERIAL_EYES = Object.freeze({ rest: [0], spin: [0], orbit: [0] })
 
@@ -235,7 +231,7 @@ export function createBot(opts) {
   eyeGroup.appendChild(eyeR)
   // 前景轨道（压在头像上）
   const orbitsFront = make(ns, 'g', { class: 'dsgb-orbits-front', 'data-dsgb-layer': 'orbits-front' })
-  // 工作态的单道并排彩带（与完成态的多条交叉轨道分开）
+  // 工作态前景尾迹（后景另置于 avatarGroup 之前）
   const trailGroup = make(ns, 'g', { class: 'dsgb-trail', 'data-dsgb-layer': 'trail' })
   // 符号层：感叹号
   const bangGroup = make(ns, 'g', { class: 'dsgb-bang', 'data-dsgb-layer': 'bang' })
@@ -253,8 +249,12 @@ export function createBot(opts) {
 
   root.appendChild(defs)
   root.appendChild(orbitsBack)
-  root.appendChild(bodyGroup)
-  root.appendChild(eyeGroup)
+  const trailBack = make(ns, 'g', { 'data-dsgb-layer': 'trail-back' })
+  root.appendChild(trailBack)
+  const avatarGroup = make(ns, 'g', { 'data-dsgb-layer': 'avatar' })
+  avatarGroup.appendChild(bodyGroup)
+  avatarGroup.appendChild(eyeGroup)
+  root.appendChild(avatarGroup)
   root.appendChild(orbitsFront)
   root.appendChild(trailGroup)
   root.appendChild(bangGroup)
@@ -263,7 +263,14 @@ export function createBot(opts) {
 
   const inst = {
     svg,
+    size,
     root,
+    defs,
+    clipId,
+    avatarGroup,
+    trailBack,
+    ribbonNodes: { trail: [], orbit: [] },
+    originalBodyPath: bodyPath(shape),
     body,
     bodyGroup,
     clipBody,
@@ -305,14 +312,16 @@ export function createBot(opts) {
  */
 export function paintFrame(inst, frame) {
   inst.frame = frame
-  const bodyTransform = frame.body.sx !== 1 || frame.body.sy !== 1
-    ? 'translate(' + fmt(FACE_CENTER) + ' ' + fmt(FACE_CENTER) + ') scale(' +
-      fmt(frame.body.sx) + ' ' + fmt(frame.body.sy) + ') translate(' + fmt(-FACE_CENTER) + ' ' + fmt(-FACE_CENTER) + ')'
-    : null
-  if (bodyTransform === null) inst.bodyGroup.removeAttribute('transform')
-  else inst.bodyGroup.setAttribute('transform', bodyTransform)
-  if (bodyTransform === null) inst.clipBody.removeAttribute('transform')
-  else inst.clipBody.setAttribute('transform', bodyTransform)
+  const b = frame.body
+  const transform = 'translate(' + (FACE_CENTER + (b.x || 0)) + ' ' + (FACE_CENTER + (b.y || 0)) +
+    ') rotate(' + (b.roll || 0) + ') scale(' + b.sx + ' ' + b.sy +
+    ') translate(' + -FACE_CENTER + ' ' + -FACE_CENTER + ')'
+  inst.avatarGroup.setAttribute('transform', transform)
+  const path = b.reference ? REFERENCE_BODY_PATH : inst.originalBodyPath
+  if (inst.body.getAttribute('d') !== path) {
+    inst.body.setAttribute('d', path)
+    inst.clipBody.setAttribute('d', path)
+  }
 
   setVisible(inst.bodyGroup, frame.body.visible && frame.body.alpha > 0.01)
   setOpacity(inst.bodyGroup, frame.body.alpha)
@@ -338,6 +347,14 @@ function paintEyes(inst, frame) {
   setVisible(inst.eyeGroup, visible)
   if (!visible) return
   setOpacity(inst.eyeGroup, eyes.alpha)
+  if (eyes.projected) {
+    for (const [i, el] of [inst.eyeL, inst.eyeR].entries()) {
+      const ring = rings[i] || []
+      setVisible(el, ring.length > 0)
+      el.setAttribute('points', ring.map(p => p.map(v => v.toFixed(4)).join(',')).join(' '))
+    }
+    return
+  }
   // 转头只来自 eyes.turn：body.turn 是「身体姿态」，两者相加会把转头算两遍
   // （实测 idle 转左时眼睛被推到 cx=-0.49D，比参考的 -0.27D 远了一倍）。
   drawRings(inst, rings, eyes.turn, eyes.gazeX, eyes.gazeY, eyes.blink, custom ? 'body' : 'material')
@@ -491,86 +508,48 @@ function paintDots(inst, frame) {
  * @param {object} frame 当前帧。
  */
 function paintOrbits(inst, frame) {
-  const orbits = frame.orbits
-  const visible = orbits.visible && orbits.alpha > 0.01 && Array.isArray(orbits.rings) && orbits.rings.length > 0
-  setVisible(inst.orbitsBack, visible)
-  setVisible(inst.orbitsFront, visible)
-  if (!visible) return
-  setOpacity(inst.orbitsBack, orbits.alpha)
-  setOpacity(inst.orbitsFront, orbits.alpha)
-  const back = []
-  const front = []
-  for (const ring of orbits.rings) {
-    const scaled = {
-      a: ring.a * orbits.scale,
-      b: ring.b * orbits.scale,
-      tilt: ring.tilt,
-      yaw: ring.yaw,
-      spin: ring.spin,
-    }
-    const split = orbitPoints(scaled, FACE_CENTER, FACE_CENTER, 120)
-    for (const seg of split.back) back.push({ color: ring.color, width: ring.width * orbits.scale, points: seg })
-    for (const seg of split.front) front.push({ color: ring.color, width: ring.width * orbits.scale, points: seg })
-  }
-  paintPolylines(inst.orbitsBack, back)
-  paintPolylines(inst.orbitsFront, front)
+  paintRibbons(inst, 'orbit', frame.orbits, inst.orbitsBack, inst.orbitsFront)
 }
 
-/**
- * 工作彩带：保留参考的并排多色弧；按侧栏可读性要求持续绕行，不再只播入场。
- * @param {object} inst 实例。
- * @param {object} frame 当前帧。
- */
 function paintTrail(inst, frame) {
-  const trail = frame.trail
-  const visible = trail.visible && trail.alpha > 0.01 && trail.radius > 0
-  setVisible(inst.trailGroup, visible)
-  if (!visible) return
-  setOpacity(inst.trailGroup, trail.alpha)
-  const bands = trailBands(trail, FACE_CENTER, FACE_CENTER, trail.colors.length || 5)
-  const bandWidth = MOTION_SPEC.spin.trailBandWidth * 210
-  const spread = Math.max((trail.width - bandWidth) / 2, 0)
-  paintPolylines(
-    inst.trailGroup,
-    bands.map((band, i) => {
-      // 五条色带沿半径方向错开排布，合起来就是参考里那道厚彩带
-      const offset = bands.length === 1 ? 0 : -spread + (2 * spread * i) / (bands.length - 1)
-      const points = band.points.map((pt) => {
-        const dx = pt[0] - FACE_CENTER
-        const dy = pt[1] - FACE_CENTER
-        const len = Math.hypot(dx, dy) || 1
-        return [pt[0] + (dx / len) * offset, pt[1] + (dy / len) * offset]
-      })
-      return { color: band.color, width: bandWidth, points }
-    }),
-  )
+  paintRibbons(inst, 'trail', frame.trail, inst.trailBack, inst.trailGroup)
 }
 
-/** 用「一条路径一条线」画折线组；重画时复用已有节点，不无限增长。 */
-function paintPolylines(group, items) {
-  while (group.children.length > items.length) {
-    const last = group.children[group.children.length - 1]
-    group.removeChild(last)
-  }
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    let el = group.children[i]
-    if (el === undefined) {
-      el = make(group.namespaceURI || 'http://www.w3.org/2000/svg', 'path', {
-        fill: 'none',
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round',
+/** Reuse bounded path/gradient pools. Both effects cross behind AND in front. */
+function paintRibbons(inst, kind, layer, back, front) {
+  const visible = layer.visible && layer.alpha > .01
+  setVisible(back, visible); setVisible(front, visible)
+  setOpacity(back, layer.alpha); setOpacity(front, layer.alpha)
+  const transform = 'translate(' + FACE_CENTER + ' ' + FACE_CENTER + ') scale(' + REFERENCE_SCALE + ') translate(' + -FACE_CENTER + ' ' + -FACE_CENTER + ')'
+  back.setAttribute('transform', transform); front.setAttribute('transform', transform)
+  const nodes = inst.ribbonNodes[kind]
+  const items = visible ? layer.rings : []
+  for (let i = 0; i < Math.max(items.length, nodes.length); i++) {
+    let node = nodes[i]
+    if (!node) {
+      const ns = inst.svg.namespaceURI || 'http://www.w3.org/2000/svg'
+      const id = inst.clipId + '-' + kind + '-' + i
+      const gradient = make(ns, 'linearGradient', { id, gradientUnits: 'userSpaceOnUse' })
+      const stops = Array.from({ length: 5 }, (_, j) => {
+        const el = make(ns, 'stop', { offset: (j / 4).toFixed(3) }); gradient.appendChild(el); return el
       })
-      group.appendChild(el)
+      inst.defs.appendChild(gradient)
+      const a = make(ns, 'path', { fill: 'url(#' + id + ')', stroke: 'none', 'data-ribbon': '' })
+      const b = make(ns, 'path', { fill: 'url(#' + id + ')', stroke: 'none', 'data-ribbon': '' })
+      back.appendChild(a); front.appendChild(b)
+      node = { gradient, stops, back: a, front: b }; nodes.push(node)
     }
-    let d = ''
-    for (let k = 0; k < item.points.length; k++) {
-      const p = item.points[k]
-      d += (k === 0 ? 'M ' : ' L ') + fmt(p[0]) + ' ' + fmt(p[1])
+    const ribbon = items[i]
+    const geometry = ribbon ? ribbonOutline(ribbon.points, ribbon.width) : { back: '', front: '' }
+    node.back.setAttribute('d', geometry.back); node.front.setAttribute('d', geometry.front)
+    setOpacity(node.back, ribbon?.alpha || 0); setOpacity(node.front, ribbon?.alpha || 0)
+    if (!ribbon || ribbon.points.length < 2) continue
+    const first = ribbon.points[0], last = ribbon.points[ribbon.points.length - 1]
+    for (const [key, value] of Object.entries({ x1: first.x, y1: first.y, x2: last.x, y2: last.y })) node.gradient.setAttribute(key, value.toFixed(1))
+    for (let j = 0; j < 5; j++) {
+      const hue = ((ribbon.hue + ribbon.hueSpan * j / 4) % 360 + 360) % 360
+      node.stops[j].setAttribute('stop-color', 'hsl(' + hue.toFixed(0) + ' 56% ' + (56 + 11 * j / 4).toFixed(0) + '%)')
     }
-    el.setAttribute('d', d)
-    el.setAttribute('stroke', item.color)
-    el.setAttribute('stroke-width', fmt(Math.max(item.width, 0.4)))
   }
 }
 
@@ -636,7 +615,7 @@ export function runBot(inst, deps) {
   let hiddenAt = 0
 
   const paintStatic = () => {
-    paintFrame(inst, sampleFrame(activeMotion(), 0, { static: true }))
+    paintFrame(inst, sampleFrame(activeMotion(), 0, { static: true, size: inst.size }))
   }
 
   const activeMotion = () => (typeof inst.state === 'string' && inst.state !== '' ? inst.state : 'rest')
@@ -655,7 +634,7 @@ export function runBot(inst, deps) {
       motionStart = tNow
     }
     const elapsed = Math.max(tNow - motionStart, 0)
-    const frame = sampleFrame(activeMotion(), elapsed)
+    const frame = sampleFrame(activeMotion(), elapsed, { size: inst.size })
     if (previousFrame !== null && transitionMs > 0) {
       const k = (tNow - transitionFrom) / transitionMs
       if (k < 1) {
@@ -743,8 +722,8 @@ function cloneFrame(frame) {
     eyes: { ...frame.eyes, rings: frame.eyes.rings === null ? null : frame.eyes.rings.map((r) => r.map((p) => [p[0], p[1]])) },
     bang: { ...frame.bang },
     dots: { ...frame.dots, items: frame.dots.items.map((item) => ({ ...item })) },
-    orbits: { ...frame.orbits, rings: frame.orbits.rings.map((ring) => ({ ...ring })) },
-    trail: { ...frame.trail, colors: Array.isArray(frame.trail.colors) ? [...frame.trail.colors] : [] },
+    orbits: { ...frame.orbits, rings: frame.orbits.rings.map((ring) => ({ ...ring, points: ring.points.map(p => ({ ...p })) })) },
+    trail: { ...frame.trail, rings: frame.trail.rings.map(r => ({ ...r, points: r.points.map(p => ({ ...p })) })) },
   }
 }
 

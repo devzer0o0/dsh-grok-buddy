@@ -3,7 +3,7 @@
  *
  * 数据流：宿主半侧把每个会话折成**六态**之一，GET /dsh-grok-buddy/state.json 下发；
  * 项目配色走 GET/POST /dsh-grok-buddy/colors.json。本脚本轮询状态、在会话行
- * 左侧的 16px 前导位里画一只 GrokBot。
+ * 左侧可伸展的前导位里画一只 GrokBot。
  *
  * 分层（照 https://x.ai/news/designing-grok-bot 的 Avatar motion system）：
  *   颜色        = 这是哪个项目（DSH Workspace），与状态无关
@@ -26,11 +26,12 @@ import { collectSurfaces, collectWorkspaceFolders } from './dom.js'
 import { dshRawStateOf, fallbackPhase, mergePhase } from './dsh-state.js'
 import { COOLDOWN_MS, isActive, inkForRow } from './activity.js'
 import { freshMemory, resolveMotion } from './celebrate.js'
+import { advanceToolCue, toolCueActive } from './tool-cue.js'
 import { CONFIRMED_STOP_SOURCES, DONE_DISPLAY_TTL_MS, TURN_SILENCE_TTL_MS, normalizePhaseInput } from '../decision.js'
 import { BOT_SIZE, folderInkStyles, paletteStyles, slotStyles } from './styles.js'
 
 /** 构建标识：版本标签之外的第二重核对（页面与源码必须对得上）。 */
-const BUILD = '2026-11-05-working-orbit'
+const BUILD = '2026-11-05-reference-motion-24'
 const STATE_URL = '/dsh-grok-buddy/state.json'
 const COLORS_URL = '/dsh-grok-buddy/colors.json'
 const PROBE_URL = '/dsh-grok-buddy/probe.json'
@@ -51,7 +52,7 @@ const FOLDER_ATTR = 'data-dsgb-workspace-folder'
 const FOLDER_INK_VAR = '--dsgb-workspace-ink'
 /** 项目行 ⋯ 菜单的容器（DSH 的 Menu 用 portal 挂到 body）。 */
 const MENU_SURFACE = '[data-menu-material]'
-/** 头像边长：取自 styles.js 的单一定义（当前 20px，等于宿主前导位高度）。 */
+/** 头像边长取自 styles.js：当前 24px，前导位随内容扩展。 */
 /**
  * 动作 → 图形构成（诊断与文档共用）。
  *
@@ -94,6 +95,8 @@ function boot() {
 
   /** sessionId → 宿主下发的行（phase / reason / completionKey / …） */
   let byId = new Map()
+  let toolCues = new Map()
+  let toolCueTimer = null
   /** workspaceId → 用户存下来的颜色 */
   let colors = {}
   /** 槽位元素 → record（按 DOM 索引，同一会话出现在多处也各有一份，各自独立动画） */
@@ -309,6 +312,7 @@ function boot() {
     const resolved = resolveMotion(phase, record.motion, PHASE_TO_MOTION, completionKey)
     record.motion = resolved.memory
     record.motionStarted = record.motionStarted === true || resolved.start === true
+    if (!document.hidden && toolCueActive(toolCues.get(record.sessionId), phase, Date.now())) return PHASE_TO_MOTION.working
     return resolved.motion
   }
 
@@ -324,6 +328,8 @@ function boot() {
     const motion = record.motionName || PHASE_TO_MOTION[phase] || PHASE_TO_MOTION.idle
     if (svg.getAttribute('data-dsgb-phase') !== phase) svg.setAttribute('data-dsgb-phase', phase)
     if (svg.getAttribute('data-dsgb-motion') !== motion) svg.setAttribute('data-dsgb-motion', motion)
+    const cue = phase === 'thinking' && motion === PHASE_TO_MOTION.working ? 'recent-tool' : ''
+    if (svg.getAttribute('data-dsgb-cue') !== cue) svg.setAttribute('data-dsgb-cue', cue)
     const tone = isActive(
       {
         phase: record.phase,
@@ -630,8 +636,12 @@ function boot() {
     const surfaceNow = surfaceOf(slot, dark)
     const inkNow = inkForRecord(record, surfaceNow)
     const nextMotion = motionFor(record, display.phase, display.completionKey)
-    // 只有动作真的变了才重置实例状态 —— 同一状态的重复轮询不得重启动画
-    if (record.inst.state !== nextMotion) {
+    // A new short-call acknowledgment must not inherit the quiet tail of a previous
+    // working loop. This is a real working -> thinking edge with fresh tool evidence,
+    // NOT a same-state poll; subsequent syncs retain the clock as before.
+    const enterToolCue = record.phase === 'working' && display.phase === 'thinking' &&
+      nextMotion === PHASE_TO_MOTION.working
+    if (record.inst.state !== nextMotion || enterToolCue) {
       record.inst.state = nextMotion
       record.inst.token += 1
       record.inst.pool = null
@@ -1235,11 +1245,33 @@ function boot() {
         turnKey: typeof item.turnKey === 'string' ? item.turnKey : '',
         errorCode: typeof item.errorCode === 'string' ? item.errorCode : '',
         retrying: item.retrying === true,
+        toolActivityKey: typeof item.toolActivityKey === 'string' ? item.toolActivityKey : '',
+        toolActivityAt: typeof item.toolActivityAt === 'number' ? item.toolActivityAt : undefined,
+        toolActivityTurnKey: typeof item.toolActivityTurnKey === 'string' ? item.toolActivityTurnKey : '',
       })
     }
     // 非空但一条都认不出：这份快照不可信，保留上一份（别把整排脸清成灰）
     if (accepted === 0 && rejected > 0) return false
     byId = next
+    const cues = new Map()
+    const at = Date.now()
+    for (const [id, entry] of next) cues.set(id, advanceToolCue(toolCues.get(id), entry, at, !document.hidden && !reduce))
+    toolCues = cues
+    if (toolCueTimer !== null) clearTimeout(toolCueTimer)
+    toolCueTimer = null
+    const deadlines = [...cues.values()].map(cue => cue.until).filter(until => until > at)
+    if (deadlines.length > 0) {
+      // One timer per page, not per bot. Re-arm for remaining sessions after expiry;
+      // expiration does not depend on another successful network response.
+      const expire = () => {
+        toolCueTimer = null
+        if (stopped) return
+        syncRows()
+        const pending = [...toolCues.values()].map(cue => cue.until).filter(until => until > Date.now())
+        if (pending.length > 0) toolCueTimer = setTimeout(expire, Math.min(...pending) - Date.now())
+      }
+      toolCueTimer = setTimeout(expire, Math.min(...deadlines) - at)
+    }
     return true
   }
 
@@ -1516,6 +1548,12 @@ function boot() {
 
   const onVisibility = () => {
     if (stopped) return
+    if (document.hidden) {
+      // Consume, don't replay old short calls when returning to a background tab.
+      for (const cue of toolCues.values()) cue.until = 0
+      if (toolCueTimer !== null) clearTimeout(toolCueTimer)
+      toolCueTimer = null
+    }
     if (!document.hidden) {
       onThemeChange()
       loadColors()
@@ -1609,6 +1647,9 @@ function boot() {
     stop() {
       if (stopped) return
       stopped = true
+      if (toolCueTimer !== null) clearTimeout(toolCueTimer)
+      toolCueTimer = null
+      toolCues.clear()
       if (timer !== null) clearTimeout(timer)
       timer = null
       if (colorsTimer !== null) clearTimeout(colorsTimer)

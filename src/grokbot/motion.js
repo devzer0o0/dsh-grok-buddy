@@ -1,3 +1,5 @@
+import { REFERENCE_MOTION, REFERENCE_SCALE, sampleReferenceMotion } from './reference-motion.js'
+
 /**
  * GrokBot 六态动作规格与采样器 —— **唯一的动画来源**。
  *
@@ -12,11 +14,11 @@
  * 六个动作 id 与六态一一对应，但**不是**同一层：
  *
  *   idle        → rest          安静：呼吸式视线漂移 + 眨眼 + 偶发转头
- *   working     → spin          转身：持续转头 + 一道持续绕行的并排彩色弧带
+ *   working     → spin          转身：完整转身 + 单平面渐变开放尾迹
  *   waiting     → half-lidded   等待：上下压扁的横线眼，低活动度
  *   blocked     → bang          阻止：头像收成感叹号（长条 + 圆点）
  *   thinking    → tri-dot       思考：三颗横点依次脉动（相位差 1/3 周期）
- *   done        → orbit         完成：头像旋转 + 多条彩色轨道前后穿插
+ *   done        → orbit         完成：九圈自转/三圈翻滚 + 三平面渐变开放尾迹
  *
  * 坐标：与 src/grokbot/data.js 同一套「身体坐标系」，中心 BOT_CENTER、
  * 身体直径 BOT_D (210)。所有轨迹半径都按 0.001×D 记录，渲染端统一缩放。
@@ -87,46 +89,8 @@ export const MOTION_SPEC = Object.freeze({
     gazeY: 0.8,
   }),
 
-  /** 转身：参考 5.0–9.5s（帧 246–470）。 */
-  spin: Object.freeze({
-    kind: 'avatar',
-    /**
-     * 稳态转头周期（量测）：参考里眼睛从左摆到右再摆回来约 2.2s，
-     * 摆幅换算成经度约 -0.55..+0.30 rad（不是整圈自转）。
-     */
-    spinMs: 2600,
-    /** 摆幅与偏置（量测：眼对中点水平位移 -26px..+15px ≈ -0.25D..+0.15D）。 */
-    swayAmp: 0.66,
-    swayBias: -0.14,
-    /**
-     * 进入时的「甩头」（估计）：参考帧 246–258 眼睛先压到几乎看不见再回来，
-     * 对应转头短暂越过侧面。参考只录到一次，这里按一次动作处理，不循环。
-     */
-    whipMs: 760,
-    whipAmp: -1.85,
-    /**
-     * 侧栏可读性调整（2026-11-05）：参考只展示了一次 1.26s 的短拖尾，旧实现
-     * 在入场 1.52s 后永久隐藏它，长任务只剩张望。现在入场后持续单弧绕行；
-     * 这是用户反馈驱动的产品调整，不声称参考录屏已证明这个循环周期。
-     */
-    trailFromMs: 60,
-    trailGrowMs: 220,
-    trailOrbitMs: 2200,
-    /** 弧长轻微呼吸（约 126°–143°），始终留缺口，不画成完整光圈。 */
-    trailArc: 2.35,
-    trailArcPulse: 0.15,
-    /**
-     * 参考彩带紧贴身体边缘。小尺寸调整为 0.59D，配合 0.12D 总宽：
-     * 内缘 0.53D，与脸有间隙；外缘 0.65D，仍在画布半径 0.75D 内。
-     */
-    trailRadius: 0.59,
-    /** 参考约 0.075D；侧栏增至 0.12D，20px 下总厚度 1.6 CSS px。 */
-    trailWidth: 0.12,
-    /** 五条完整弧带径向并排且略重叠，避免小尺寸抗锯齿产生断缝。 */
-    trailBandWidth: 0.035,
-    /** 拖尾颜色带：参考里是 5 条并排的彩色带（量测）。 */
-    trailColors: Object.freeze(['#7ad8a8', '#7ad87a', '#8a7ad8', '#d87ac0', '#d8b878']),
-  }),
+  /** 官方 working：完整转身及单平面渐变尾迹；按完整表演循环，不画常亮光环。 */
+  spin: Object.freeze({ kind: 'avatar', ...REFERENCE_MOTION.spin }),
 
   /** 等待：参考 9.5–13.8s（帧 470–682）。 */
   halfLidded: Object.freeze({
@@ -199,26 +163,8 @@ export const MOTION_SPEC = Object.freeze({
     enterMs: 320,
   }),
 
-  /** 完成：参考 22.7–26.9s（帧 1121–1330）。 */
-  orbit: Object.freeze({
-    kind: 'avatar',
-    /** 进入：头像从三点长回来（参考 1116–1152，0.72s），轨道随后展开。 */
-    enterMs: 420,
-    /** 稳态已测：轨道持续转动；半径包络 0.704D（量测）。 */
-    radius: 0.60,
-    /** 轨道线宽：参考横截面扫描中位数 7px = 0.068D（量测）。 */
-    width: 0.068,
-    /** 头像自身缓慢旋转（参考里朝向一直在变，量测为连续转动）。 */
-    spinMs: 3200,
-    rings: Object.freeze([
-      Object.freeze({ a: 0.66, b: 0.25, tilt: 0.35, yaw: 0.25, speed: 0.42, color: '#7ad97a', phase: 0.0 }),
-      Object.freeze({ a: 0.64, b: 0.30, tilt: -0.55, yaw: 0.15, speed: -0.31, color: '#d9b878', phase: 1.1 }),
-      Object.freeze({ a: 0.70, b: 0.20, tilt: 1.15, yaw: 0.05, speed: 0.55, color: '#7ad8b4', phase: 2.3 }),
-      Object.freeze({ a: 0.60, b: 0.34, tilt: 0.1, yaw: 0.65, speed: -0.46, color: '#d97a7a', phase: 3.2 }),
-      Object.freeze({ a: 0.68, b: 0.24, tilt: -0.95, yaw: -0.35, speed: 0.37, color: '#8a7ad9', phase: 4.4 }),
-      Object.freeze({ a: 0.58, b: 0.28, tilt: 0.7, yaw: 0.45, speed: -0.62, color: '#d97ac0', phase: 5.1 }),
-    ]),
-  }),
+  /** 官方 celebrate：九圈转头 + 三圈翻滚 + 三平面开放尾迹 + 减速回正。 */
+  orbit: Object.freeze({ kind: 'avatar', ...REFERENCE_MOTION.orbit }),
 })
 
 /** 动作 id → 规格。 */
@@ -321,14 +267,14 @@ export function emptyFrame(motion) {
   return {
     motion: typeof motion === 'string' ? motion : '',
     time: 0,
-    body: { visible: true, alpha: 1, sx: 1, sy: 1, turn: 0 },
+    body: { visible: true, alpha: 1, sx: 1, sy: 1, turn: 0, x: 0, y: 0, roll: 0, reference: false },
     // blink 默认 1 = 完全睁开。静态帧就是靠这个默认值站住的 —— 之前写成 0，
     // 结果 reduced-motion 下六态全是「闭着眼」的薄片。
-    eyes: { visible: true, alpha: 1, rings: null, turn: 0, gazeX: 0, gazeY: 0, blink: 1, scale: 1 },
+    eyes: { visible: true, alpha: 1, rings: null, projected: false, turn: 0, gazeX: 0, gazeY: 0, blink: 1, scale: 1 },
     bang: { visible: false, alpha: 0, grow: 0 },
     dots: { visible: false, alpha: 0, items: [] },
     orbits: { visible: false, alpha: 0, scale: 1, rings: [] },
-    trail: { visible: false, alpha: 0, radius: 0, width: 0, from: 0, to: 0, colors: [] },
+    trail: { visible: false, alpha: 0, rings: [] },
   }
 }
 
@@ -388,15 +334,16 @@ export function atOffset(fx, fy) {
  * @param {number} tMs 该动作已运行的时间（毫秒）。
  * @param {object} [options] 采样选项。
  * @param {boolean} [options.static] 减少动效：返回该动作的代表性静态帧。
+ * @param {boolean} [options.referenceTiming] 独立参考比较用原生时间轴；产品 working 默认提前 1500ms 入场。
  * @returns {object} 帧描述（纯数据，可直接断言）。
  */
 export function sampleFrame(motionId, tMs, options) {
   const spec = MOTION_BY_ID[motionId] || MOTION_SPEC.rest
-  const t = typeof tMs === 'number' && tMs > 0 ? tMs : 0
+  const t = typeof tMs === 'number' && Number.isFinite(tMs) && tMs > 0 ? tMs : 0
   const opts = options !== undefined && options !== null ? options : {}
   const frame = emptyFrame(motionId)
   frame.time = t
-  if (opts.static === true) return staticFrame(motionId)
+  if (opts.static === true) return staticFrame(motionId, options)
 
   if (spec === MOTION_SPEC.rest) {
     const turn = idleTurn(t, spec) + spec.breathTurn * Math.sin((t / spec.breathMs) * Math.PI * 2)
@@ -408,31 +355,27 @@ export function sampleFrame(motionId, tMs, options) {
     return frame
   }
 
-  if (spec === MOTION_SPEC.spin) {
-    // 进入加速：参考 246–320 从静止转到稳定转速
-    // 进入时先甩一下头（眼睛压到侧面、短暂消失再回来），然后进入持续的左右张望。
-    const whip = spec.whipAmp * Math.sin(Math.PI * clamp((t - 120) / spec.whipMs, 0, 1))
-    const sway = spec.swayAmp * Math.sin((t / spec.spinMs) * Math.PI * 2) + spec.swayBias
-    const turn = sway + whip
-    frame.body.turn = turn * 0.35
-    frame.eyes.turn = turn
-    frame.eyes.gazeY = 0.4 * Math.sin((t / 1600) * Math.PI * 2)
-    // 单道彩色弧带持续绕行：只增长入场一次，不在每圈接缝清零或重播甩头。
-    const start = spec.trailFromMs
-    if (t >= start) {
-      const p = t - start
-      const angle = (p / spec.trailOrbitMs) * Math.PI * 2
-      const grow = easeOut(clamp(p / spec.trailGrowMs, 0, 1))
-      const len = (spec.trailArc + spec.trailArcPulse * Math.sin(angle)) * grow
-      frame.trail.visible = grow > 0.01
-      frame.trail.alpha = grow
-      frame.trail.radius = spec.trailRadius * D
-      frame.trail.width = spec.trailWidth * D
-      const head = 4.25 + angle
-      frame.trail.from = head - len
-      frame.trail.to = head
-      frame.trail.colors = Array.from(spec.trailColors)
-    }
+  if (spec === MOTION_SPEC.spin || spec === MOTION_SPEC.orbit) {
+    // Only rotate the working loop's entry phase: keep the authored speed/geometry,
+    // but don't spend the first 1.5s resting while a short command is already running.
+    // Native timing remains explicitly available to independent oracle comparisons.
+    const offset = motionId === 'spin' && opts.referenceTiming !== true ? 1500 : 0
+    const reference = sampleReferenceMotion(motionId, t + offset, opts.size || 128)
+    frame.body.reference = true
+    frame.body.x = reference.pose.x * REFERENCE_SCALE
+    frame.body.y = reference.pose.y * REFERENCE_SCALE
+    frame.body.roll = reference.pose.roll
+    frame.body.sy = reference.pose.sy
+    frame.eyes.projected = true
+    frame.eyes.turn = reference.turn
+    frame.eyes.rings = reference.eyes.map(ring => ring.map(([x, y]) => [
+      BOT_CENTER + (x - BOT_CENTER) * REFERENCE_SCALE,
+      BOT_CENTER + (y - BOT_CENTER) * REFERENCE_SCALE,
+    ]))
+    const layer = spec === MOTION_SPEC.spin ? frame.trail : frame.orbits
+    layer.rings = reference.ribbons
+    layer.visible = reference.ribbons.some(r => r.points.length > 1)
+    layer.alpha = 1
     return frame
   }
 
@@ -512,30 +455,6 @@ export function sampleFrame(motionId, tMs, options) {
     return frame
   }
 
-  // orbit
-  const k = clamp(t / spec.enterMs, 0, 1)
-  const grow = easeOut(k)
-  // 头像朝左右缓慢摇摆而不是整圈自转：参考里 done 的眼睛**一直看得见**，
-  // 只是会在边缘被压扁/短暂消失；整圈自转会让眼睛长时间转到背面（实测错误）。
-  const sway = 0.62 * Math.sin((t / spec.spinMs) * Math.PI * 2)
-  frame.body.sx = 0.18 + 0.82 * grow
-  frame.body.sy = 0.18 + 0.82 * grow
-  frame.body.turn = sway * 0.4
-  frame.eyes.turn = sway
-  frame.eyes.alpha = clamp((k - 0.35) / 0.65, 0, 1)
-  frame.eyes.visible = frame.eyes.alpha > 0.02
-  frame.orbits.visible = k > 0.05
-  frame.orbits.alpha = clamp((k - 0.05) / 0.7, 0, 1)
-  frame.orbits.scale = 0.35 + 0.65 * grow
-  frame.orbits.rings = spec.rings.map((ring) => ({
-    a: ring.a * D,
-    b: ring.b * D,
-    tilt: ring.tilt,
-    yaw: ring.yaw,
-    spin: ring.phase * Math.PI + t * 0.001 * ring.speed * Math.PI * 2,
-    color: ring.color,
-    width: spec.width * D,
-  }))
   return frame
 }
 
@@ -548,24 +467,14 @@ export function sampleFrame(motionId, tMs, options) {
  * @param {string} motionId 动作 id。
  * @returns {object} 帧描述。
  */
-export function staticFrame(motionId) {
+export function staticFrame(motionId, options) {
   const frame = emptyFrame(motionId)
   if (motionId === 'rest' || motionId === '') {
     frame.eyes.turn = 0.1
     return frame
   }
-  if (motionId === 'spin') {
-    // 代表帧：眼睛转到接近正中（参考帧 300 附近的样子），拖尾扫在左上侧
-    frame.eyes.turn = -0.42
-    frame.body.turn = -0.15
-    frame.trail.visible = true
-    frame.trail.alpha = 1
-    frame.trail.radius = MOTION_SPEC.spin.trailRadius * D
-    frame.trail.width = MOTION_SPEC.spin.trailWidth * D
-    frame.trail.to = 4.25
-    frame.trail.from = frame.trail.to - MOTION_SPEC.spin.trailArc
-    frame.trail.colors = Array.from(MOTION_SPEC.spin.trailColors)
-    return frame
+  if (motionId === 'spin' || motionId === 'orbit') {
+    return sampleFrame(motionId, REFERENCE_MOTION[motionId].staticMs, { size: options?.size || 128, referenceTiming: true })
   }
   if (motionId === 'half-lidded') {
     const len = MOTION_SPEC.halfLidded.eyeLen * D
@@ -614,109 +523,7 @@ export function staticFrame(motionId) {
     }))
     return frame
   }
-  // orbit：头像 + 轨道各就各位的一帧（眼睛仍在脸内，参考里 done 的眼睛从不整体转走）
-  frame.eyes.turn = 0.28
-  frame.body.turn = 0.12
-  frame.orbits.visible = true
-  frame.orbits.alpha = 1
-  frame.orbits.scale = 1
-  frame.orbits.rings = MOTION_SPEC.orbit.rings.map((ring) => ({
-    a: ring.a * D,
-    b: ring.b * D,
-    tilt: ring.tilt,
-    yaw: ring.yaw,
-    spin: ring.phase * Math.PI + 0.8,
-    color: ring.color,
-    width: MOTION_SPEC.orbit.width * D,
-  }))
   return frame
-}
-
-/**
- * 把一条轨道的三维姿态投到二维，并按深度切成「身后」「身前」两段。
- *
- * 参考里轨道会在头像后面消失、再从前面绕出来（前后穿插），所以不能整条平铺
- * 在同一层：必须按 z 的符号分段。
- *
- * @param {object} ring 轨道参数（a/b/tilt/yaw/spin）。
- * @param {number} cx 圆心 x。
- * @param {number} cy 圆心 y。
- * @param {number} [segments] 采样段数。
- * @returns {{back: Array<Array<[number, number]>>, front: Array<Array<[number, number]>>}} 两段折线集合。
- */
-export function orbitPoints(ring, cx, cy, segments) {
-  const n = typeof segments === 'number' && segments >= 24 ? segments : 96
-  const back = []
-  const front = []
-  let currentBack = null
-  let currentFront = null
-  for (let i = 0; i <= n; i++) {
-    const phi = (i / n) * Math.PI * 2
-    const x0 = Math.cos(phi) * ring.a
-    const y0 = Math.sin(phi) * ring.b
-    const cs = Math.cos(ring.spin)
-    const ss = Math.sin(ring.spin)
-    const x1 = x0 * cs - y0 * ss
-    const y1 = x0 * ss + y0 * cs
-    const ct = Math.cos(ring.tilt)
-    const st = Math.sin(ring.tilt)
-    const y2 = y1 * ct
-    const z2 = y1 * st
-    const cyw = Math.cos(ring.yaw)
-    const syw = Math.sin(ring.yaw)
-    const x3 = x1 * cyw + z2 * syw
-    const z3 = -x1 * syw + z2 * cyw
-    // 轻微透视：前面的轨道看着大一点
-    const persp = 1 + z3 / (Math.max(ring.a, ring.b) * 7)
-    const point = [cx + x3 * persp, cy + y2 * persp]
-    const isFront = z3 >= 0
-    if (isFront) {
-      if (currentFront === null) {
-        currentFront = []
-        front.push(currentFront)
-      }
-      currentFront.push(point)
-      currentBack = null
-    } else {
-      if (currentBack === null) {
-        currentBack = []
-        back.push(currentBack)
-      }
-      currentBack.push(point)
-      currentFront = null
-    }
-  }
-  const clean = (list) => list.filter((seg) => seg.length >= 2)
-  return { back: clean(back), front: clean(front) }
-}
-
-/**
- * 生成并排彩带的完整弧线。每种颜色覆盖同一角度区间，径向错位由渲染层负责；
- * 不能按角度切成五小段，否则每种颜色只剩亚像素宽的一截，参考的厚彩带消失。
- *
- * @param {object} trail 拖尾参数。
- * @param {number} cx 圆心 x。
- * @param {number} cy 圆心 y。
- * @param {number} [bands] 色带条数。
- * @returns {Array<{color: string, points: Array<[number, number]>}>} 每条完整弧线。
- */
-export function trailBands(trail, cx, cy, bands) {
-  const colors = Array.isArray(trail.colors) ? trail.colors : []
-  const n = typeof bands === 'number' && bands > 0 ? bands : Math.max(colors.length, 1)
-  const out = []
-  if (trail.visible !== true || trail.radius <= 0) return out
-  const total = trail.to - trail.from
-  if (!(total > 0.001)) return out
-  for (let i = 0; i < n; i++) {
-    const points = []
-    const steps = 48
-    for (let s = 0; s <= steps; s++) {
-      const ang = trail.from + (total * s) / steps
-      points.push([cx + Math.cos(ang) * trail.radius, cy + Math.sin(ang) * trail.radius])
-    }
-    out.push({ color: colors.length === 0 ? '#7ad8a8' : colors[i % colors.length], points })
-  }
-  return out
 }
 
 /**
@@ -748,12 +555,17 @@ export function blendFrames(from, to, k) {
     sx: scaleFrom.sx + (scaleTo.sx - scaleFrom.sx) * p,
     sy: scaleFrom.sy + (scaleTo.sy - scaleFrom.sy) * p,
     turn: a.body.turn + (b.body.turn - a.body.turn) * p,
+    x: (a.body.x || 0) + ((b.body.x || 0) - (a.body.x || 0)) * p,
+    y: (a.body.y || 0) + ((b.body.y || 0) - (a.body.y || 0)) * p,
+    roll: (() => { const delta = ((b.body.roll - a.body.roll + 540) % 360 + 360) % 360 - 180; return a.body.roll + delta * p })(),
+    reference: p < .5 ? a.body.reference : b.body.reference,
   }
-  const bothRings = Array.isArray(a.eyes.rings) && Array.isArray(b.eyes.rings)
+  const bothRings = a.eyes.projected === b.eyes.projected && Array.isArray(a.eyes.rings) && Array.isArray(b.eyes.rings)
   frame.eyes = {
     visible: bothRings ? b.eyes.visible : p < 0.5 ? a.eyes.visible : b.eyes.visible,
     alpha: a.eyes.alpha + (b.eyes.alpha - a.eyes.alpha) * p,
     rings: null,
+    projected: p < .5 ? a.eyes.projected : b.eyes.projected,
     turn: a.eyes.turn + (b.eyes.turn - a.eyes.turn) * p,
     gazeX: a.eyes.gazeX + (b.eyes.gazeX - a.eyes.gazeX) * p,
     gazeY: a.eyes.gazeY + (b.eyes.gazeY - a.eyes.gazeY) * p,
@@ -798,14 +610,17 @@ export function blendFrames(from, to, k) {
   }
 
   const trailAlpha = a.trail.alpha + (b.trail.alpha - a.trail.alpha) * p
+  const chooseLayer = (left, right) => {
+    // Retain the outgoing paths while they fade out; do not drop them at k=.5.
+    if (!right.rings.length) return left.rings
+    if (!left.rings.length) return right.rings
+    return p < .5 ? left.rings : right.rings
+  }
+  frame.orbits.rings = chooseLayer(a.orbits, b.orbits)
   frame.trail = {
-    visible: trailAlpha > 0.01 && (p >= 0.5 ? b.trail.visible : a.trail.visible),
+    visible: trailAlpha > .01,
     alpha: trailAlpha,
-    radius: a.trail.radius + (b.trail.radius - a.trail.radius) * p,
-    width: a.trail.width + (b.trail.width - a.trail.width) * p,
-    from: a.trail.from + (b.trail.from - a.trail.from) * p,
-    to: a.trail.to + (b.trail.to - a.trail.to) * p,
-    colors: (p >= 0.5 ? b.trail.colors : a.trail.colors) || [],
+    rings: chooseLayer(a.trail, b.trail),
   }
   return frame
 }

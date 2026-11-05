@@ -24,6 +24,7 @@ import { Doc, El, jsonResponse } from './dom-harness.mjs'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
 import { BOT_SIZE } from '../src/widget/styles.js'
 import { defaultInk, storeKey } from '../src/palette.js'
+import { createRegistry } from '../lib/derive.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BUNDLE = path.join(HERE, '..', 'lib', 'widget.js')
@@ -341,6 +342,79 @@ test('构建产物能真的 boot 起来，并把头像挂进前导位', async ()
   assert.equal(bot.getAttribute('width'), String(BOT_SIZE))
   assert.equal(bot.getAttribute('data-dsgb-phase'), 'thinking')
   assert.equal(slot.getAttribute('data-dsgb-slot'), '1')
+  h.api.stop()
+})
+
+test('真实事件折叠 → 快照 → bundle：短命令在两次轮询间完成也能画出 working 尾迹', async () => {
+  const h = await boot()
+  const section = makeSection(h.doc, 'tools')
+  const { slot } = makeRow(h.doc, section, 'short-tool', false)
+  const registry = createRegistry({ now: () => h.sandbox.Date.now() })
+  const event = (type, data) => registry.onEvent({ id: 'short-tool' }, { type, data: { turn: 1, ...data } })
+  event('turn/start', {})
+  event('tool/call', { callId: 'bash-1', name: 'bash' })
+  await h.tick(20)
+  event('tool/result', { message: { source: { callId: 'bash-1' } } })
+  const body = registry.snapshot()
+  assert.equal(body.sessions[0].phase, 'thinking', '不能谎报工具仍在执行')
+  h.setState(body)
+  await h.tick(500)
+  const bot = botOf(slot)
+  assert.equal(bot.getAttribute('data-dsgb-phase'), 'thinking')
+  assert.equal(bot.getAttribute('data-dsgb-motion'), 'spin')
+  assert.equal(bot.getAttribute('data-dsgb-cue'), 'recent-tool')
+  await h.frame(16)
+  const paths = ['trail-back', 'trail'].flatMap(layer => [...bot.querySelector('[data-dsgb-layer="' + layer + '"]').children])
+  assert.ok([...paths].some(p => p.getAttribute('d')), '不到 300ms 已有实际彩带路径，不只是 motion 标签')
+  h.api.sync()
+  assert.equal(botOf(slot), bot, '重复同步不重建实例')
+  h.failFetch(true)
+  await h.tick(700)
+  assert.equal(bot.getAttribute('data-dsgb-motion'), 'tri-dot', '网络失败也不延长 650ms 提示')
+  h.failFetch(false)
+  await h.tick(600)
+  assert.equal(bot.getAttribute('data-dsgb-motion'), 'tri-dot', '同一调用不重播')
+  h.api.stop()
+  assert.equal(h.timers, 0)
+})
+
+for (const nextPhase of ['done', 'waiting', 'blocked', 'idle']) {
+  test(`短调用提示不覆盖 ${nextPhase}，且失活后不重播`, async () => {
+    const h = await boot()
+    const { slot } = makeRow(h.doc, makeSection(h.doc, 'tools'), 's', false)
+    const evidence = { turnKey: 's#1', toolActivityKey: 's:tool:1', toolActivityAt: h.sandbox.Date.now(), toolActivityTurnKey: 's#1' }
+    h.setState(sessionsBody([phaseRow('s', 'thinking', evidence)]))
+    await h.tick(500)
+    assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'spin')
+    h.setState(sessionsBody([phaseRow('s', nextPhase, evidence)]))
+    await h.tick(500)
+    assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), PHASE_TO_MOTION[nextPhase])
+    h.api.stop()
+  })
+}
+
+test('reduced-motion 不补播短工具，仍保留 thinking 静态三点', async () => {
+  const h = await boot({ reduced: true })
+  const { slot } = makeRow(h.doc, makeSection(h.doc, 'tools'), 's', false)
+  h.setState(sessionsBody([phaseRow('s', 'thinking', { turnKey: 's#1', toolActivityKey: 's:tool:1', toolActivityAt: h.sandbox.Date.now(), toolActivityTurnKey: 's#1' })]))
+  await h.tick(500)
+  assert.equal(botOf(slot).getAttribute('data-dsgb-motion'), 'tri-dot')
+  h.api.stop()
+})
+
+test('短调用提示不能继承前一段 working 的无彩带收尾帧', async () => {
+  const h = await boot()
+  const { slot } = makeRow(h.doc, makeSection(h.doc, 'tools'), 's', false)
+  h.setState(sessionsBody([phaseRow('s', 'working')]))
+  await h.tick(500)
+  await h.frame(150)
+  const bot = botOf(slot)
+  const ribbons = () => ['trail-back','trail'].flatMap(layer => [...bot.querySelector('[data-dsgb-layer="'+layer+'"]').children])
+  assert.ok(ribbons().every(p => !p.getAttribute('d')), '前提：旧动作正在安静收尾')
+  h.setState(sessionsBody([phaseRow('s', 'thinking', { turnKey: 's#1', toolActivityKey: 's:tool:2', toolActivityAt: h.sandbox.Date.now(), toolActivityTurnKey: 's#1' })]))
+  await h.tick(500)
+  await h.frame(18)
+  assert.ok(ribbons().some(p => p.getAttribute('d')), '新提示在 300ms 内可见，不能落在旧循环的静止部分')
   h.api.stop()
 })
 

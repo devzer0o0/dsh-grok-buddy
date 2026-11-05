@@ -122,6 +122,8 @@ export function emptyFacts(sessionId) {
     agentRunning: false,
     /** 未结束的工具调用：[{ callId, name, at }]。 */
     tools: [],
+    /** 最近一次实际工具调用的动效提示证据；不参与六态判定。 */
+    toolActivity: undefined,
     /** 未解决的交互：undefined 或 { kind, toolName, at, key }。 */
     pendingInteraction: undefined,
     /** **所有**未解决的交互：[{ kind, toolName, at, key, turnKey, source }]。 */
@@ -490,14 +492,15 @@ export function decide(facts, options) {
   const lastActivity = typeof f.lastActivityAt === 'number' ? f.lastActivityAt : 0
   const silent = lastActivity > 0 && now - lastActivity > silenceTtl
 
-  // 「这一轮还在进行」的三种证据：
+  // 「这一轮还在进行」的证据：
   //   · 宿主明确开着这一轮
   //   · agent 在跑（插件中途接入时的兜底）
+  //   · 已接受的在途工具（插件中途接入、没见过 turn/start 时也有效）
   //   · 有一条未解决的交互 —— 它本身就是「有事等着人处理」的强证据，
   //     不存在于任何已结束或无活动任务上。所以插件中途接入、只收到挂起提问时，
   //     也能正确显示 waiting 而不是 idle。
   const hasPending = pending !== undefined && pending !== null
-  const running = f.turnOpen === true || (f.turnOpen !== true && f.agentRunning === true) || hasPending
+  const running = f.turnOpen === true || f.agentRunning === true || hasPending || tools.length > 0
   if (!running) {
     // 没有在途任务，也没有停止证据：这就是空闲。**不拿沉默或诊断错误冒充 blocked**。
     return { phase: 'idle', reason: f.turnOpen === true ? 'silent-turn' : 'no-open-turn', completionKey, done: false }

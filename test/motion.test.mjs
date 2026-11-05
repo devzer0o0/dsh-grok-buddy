@@ -4,7 +4,7 @@
  * 旧版本这一层只断言「六个动作名字互不相同」，所以「blocked = 瞪眼不眨眼」
  * 这种完全不对的实现也能全绿。现在改成：
  *   1. 每个动作在确定时刻采样，断言它画出来的**构成**（头像 / 感叹号 / 三点 / 轨道）
- *   2. 断言时间行为（工作彩带持续绕行、三点有相位差、轨道在动、同态不重播）
+ *   2. 断言时间行为（完整转身及开放尾迹循环、三点有相位差、轨道在动、同态不重播）
  *   3. 断言任意两态切换都能量到中间态，而不是硬跳
  *
  * @module test/motion.test
@@ -15,16 +15,15 @@ import {
   BOT_CENTER,
   MOTION_BY_ID,
   MOTION_SPEC,
-  orbitPoints,
   sampleFrame,
   staticFrame,
   transitionOf,
-  trailBands,
   blendFrames,
   capsuleRing,
 } from '../src/grokbot/motion.js'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
 import { RUNTIME_PHASES } from '../src/decision.js'
+import { REFERENCE_SCALE } from '../src/grokbot/reference-motion.js'
 import { BOT_SIZE } from '../src/widget/styles.js'
 
 const D = 210
@@ -51,7 +50,7 @@ function hasOrbits(frame) {
 }
 
 function hasTrail(frame) {
-  return frame.trail.visible && frame.trail.alpha > 0.01 && frame.trail.radius > 0
+  return frame.trail.visible && frame.trail.alpha > 0.01 && frame.trail.rings.length > 0
 }
 
 test('六态各自映射到一个已定义的动作，一个不多一个不少', () => {
@@ -99,36 +98,19 @@ test('A4 done 稳态是「头像 + 有效彩色轨道」', () => {
   assert.ok(hasEyes(frame), 'done 要有眼睛')
   assert.ok(hasOrbits(frame), 'done 必须有轨道 —— 不是只有开心眼型')
   assert.ok(frame.orbits.rings.length >= 4, '是多条轨道，不是一条彩线')
-  const colors = new Set(frame.orbits.rings.map((ring) => ring.color))
+  const colors = new Set(frame.orbits.rings.map((ring) => ring.hue))
   assert.ok(colors.size >= 4, '轨道是多色的，不是单色描边')
 })
 
-test('A5 轨道的点环真的落在头像之外（不是贴在脸上的彩线）', () => {
-  const frame = sampleFrame('orbit', 2000)
-  const cx = BOT_CENTER
-  const cy = BOT_CENTER
-  let maxR = 0
-  for (const ring of frame.orbits.rings) {
-    const split = orbitPoints(ring, cx, cy, 96)
-    for (const seg of [...split.back, ...split.front]) {
-      for (const p of seg) maxR = Math.max(maxR, Math.hypot(p[0] - cx, p[1] - cy))
-    }
-  }
-  assert.ok(maxR > D / 2, '轨道半径必须超过头像半径（' + maxR.toFixed(1) + '）')
-  assert.ok(maxR < 210 * 0.75, '轨道不能超出 1.5× 画布的安全边距（' + maxR.toFixed(1) + '）')
+test('A5 开放尾迹的包络伸到身体之外', () => {
+ const f=sampleFrame('orbit',2000)
+ const maxR=Math.max(...f.orbits.rings.flatMap(r=>r.points.map(p=>Math.hypot(p.x-BOT_CENTER,p.y-BOT_CENTER)*REFERENCE_SCALE)))
+ assert.ok(maxR>D*.55&&maxR<D*.75)
 })
 
-test('A6 轨道有前后两层：身后与身前都要有段', () => {
-  const frame = sampleFrame('orbit', 2400)
-  let back = 0
-  let front = 0
-  for (const ring of frame.orbits.rings) {
-    const split = orbitPoints(ring, BOT_CENTER, BOT_CENTER, 120)
-    back += split.back.length
-    front += split.front.length
-  }
-  assert.ok(back > 0, '轨道必须有身后段（会被头像挡住）')
-  assert.ok(front > 0, '轨道必须有身前段（压着头像）')
+test('A6 开放尾迹以真实深度划分前后', () => {
+ const pts=sampleFrame('orbit',2400).orbits.rings.flatMap(r=>r.points)
+ assert.ok(pts.some(p=>p.z<0));assert.ok(pts.some(p=>p.z>0))
 })
 
 test('A7 waiting 用压扁的横线眼，长宽比与参考一致', () => {
@@ -199,45 +181,22 @@ test('A8 idle 的眨眼是纵向压扁，且不改变视线朝向', () => {
 
 // ── B. 时间行为 ────────────────────────────────────────────────────────────
 
-test('B1 working 的彩带入场后持续可见，长任务不能退成只有张望的脸', () => {
-  const spec = MOTION_SPEC.spin
-  assert.equal(hasTrail(sampleFrame('spin', 0)), false, '刚进入时还没有拖尾')
-  const grown = sampleFrame('spin', spec.trailFromMs + spec.trailGrowMs)
-  assert.ok(hasTrail(grown), '彩带要在入场阶段形成')
-  for (let t = 1600; t <= 60000; t += 40) {
-    const frame = sampleFrame('spin', t)
-    assert.ok(hasTrail(frame), t + 'ms 时仍须有环绕彩带')
-    assert.ok(frame.trail.alpha >= 0.9, t + 'ms 时不能变淡到难以识别')
-    const arc = frame.trail.to - frame.trail.from
-    assert.ok(arc >= 2 && arc < Math.PI, '保持明显的短弧，不变成整圈边框')
-    assert.equal(hasOrbits(frame), false, 'working 不借用 done 的多层交叉轨道')
-  }
-  assert.ok(hasTrail(sampleFrame('spin', 60 * 60 * 1000)), '长时间工作仍有彩带')
+test('B1 working 完整表演循环，长任务不会只转一次', () => {
+ const period=MOTION_SPEC.spin.cycleMs, expected=sampleFrame('spin',850).trail
+ assert.ok(hasTrail(sampleFrame('spin',850)))
+ for(const n of [1,4,20,100]) assert.deepEqual(sampleFrame('spin',850+n*period).trail,expected)
+ assert.equal(hasTrail(sampleFrame('spin',2700)),false,'按原版自然收尾，不残留常亮光环')
 })
 
-test('B1b working 的彩带确实绕完整一圈，循环接缝不闪断', () => {
-  const spec = MOTION_SPEC.spin
-  const head = (t) => {
-    const f = sampleFrame('spin', t).trail
-    return [Math.cos(f.to), Math.sin(f.to)]
-  }
-  const a = head(5000)
-  const b = head(5000 + spec.trailOrbitMs / 2)
-  const c = head(5000 + spec.trailOrbitMs)
-  assert.ok(a[0] * b[0] + a[1] * b[1] < -0.99, '半圈后到达头像另一侧，而非原地摆动')
-  assert.ok(Math.hypot(a[0] - c[0], a[1] - c[1]) < 0.001, '一圈回到同一位置')
-  for (let n = 1; n <= 5; n++) {
-    const edge = spec.trailFromMs + n * spec.trailOrbitMs
-    const before = sampleFrame('spin', edge - 1).trail
-    const after = sampleFrame('spin', edge + 1).trail
-    assert.ok(before.visible && after.visible, '循环边界保持可见')
-    assert.ok(Math.abs(after.to - before.to) < 0.02, '头部连续，无重播跳变')
-    assert.ok(Math.abs((after.to - after.from) - (before.to - before.from)) < 0.02, '弧长连续')
-  }
+test('B1b working 循环接缝没有残留尾迹，姿态平滑归位', () => {
+ const p=MOTION_SPEC.spin.cycleMs-1500,a=sampleFrame('spin',p-.1),b=sampleFrame('spin',p)
+ assert.equal(a.trail.visible,false);assert.equal(b.trail.visible,false)
+ assert.ok(Math.abs(a.body.roll-b.body.roll)<.01)
+ for(let i=0;i<2;i++)for(let j=0;j<a.eyes.rings[i].length;j++)assert.ok(Math.hypot(...a.eyes.rings[i][j].map((v,k)=>v-b.eyes.rings[i][j][k]))<.01)
 })
 
 test('B1c 离开 working 后彩带退场，其他运行态不残留工作特效', () => {
-  const from = sampleFrame('spin', 5000)
+  const from = sampleFrame('spin', 850)
   assert.ok(hasTrail(from))
   for (const motion of ['rest', 'half-lidded', 'bang', 'tri-dot', 'orbit']) {
     const to = sampleFrame(motion, 5000)
@@ -246,41 +205,19 @@ test('B1c 离开 working 后彩带退场，其他运行态不残留工作特效'
   }
 })
 
-test('B2 working 的转头是持续张望，幅度明显大于 idle 的呼吸', () => {
-  const span = (motion, from, to) => {
-    let min = Infinity
-    let max = -Infinity
-    for (let t = from; t <= to; t += 20) {
-      const v = sampleFrame(motion, t).eyes.turn
-      min = Math.min(min, v)
-      max = Math.max(max, v)
-    }
-    return max - min
-  }
-  const spinSpan = span('spin', 1000, 5000)
-  assert.ok(spinSpan > 1.0, 'working 的转头幅度要够大（实测 ' + spinSpan.toFixed(2) + ' rad）')
-  // idle 是「看一眼就停住」，working 是持续张望：用小段时间内的位移密度比较。
-  const motion_density = (motion) => {
-    let total = 0
-    for (let t = 1000; t < 5000; t += 20) {
-      total += Math.abs(sampleFrame(motion, t + 20).eyes.turn - sampleFrame(motion, t).eyes.turn)
-    }
-    return total
-  }
-  assert.ok(motion_density('spin') > motion_density('rest') * 3, 'working 的单位时间转头量必须显著大于 idle')
-  // 持续：两个相邻周期内都在动，不是转一下就停
-  const a = span('spin', 3000, 4200)
-  const b = span('spin', 5200, 6400)
-  assert.ok(a > 0.5 && b > 0.5, '转头是持续的，不是一次性')
+test('B2 working 是完整球面转身，不是左右摆动', () => {
+ const frames=Array.from({length:120},(_,i)=>sampleFrame('spin',i*12))
+ assert.ok(Math.max(...frames.map(f=>f.eyes.turn))>6)
+ assert.ok(frames.some(f=>f.eyes.rings.every(r=>r.length===0)))
+ assert.ok(frames.some(f=>f.eyes.rings.every(r=>r.length>0)))
 })
 
-test('B2b working 进入时先甩一下头（参考帧 246–258 眼睛压到侧面再回来）', () => {
-  let extreme = 0
-  for (let t = 120; t < 900; t += 20) extreme = Math.min(extreme, sampleFrame('spin', t).eyes.turn)
-  assert.ok(extreme < -1.1, '进入时转头要越过侧面（实测 ' + extreme.toFixed(2) + '）')
-  const steady = []
-  for (let t = 3000; t < 5000; t += 40) steady.push(sampleFrame('spin', t).eyes.turn)
-  assert.ok(Math.min(...steady) > -1.1, '甩头只发生在进入阶段，稳态不重复')
+test('B2b working 进入 200ms 内转身并画出彩带，不先静止 1.5 秒', () => {
+ const f=sampleFrame('spin',200,{size:24})
+ assert.ok(f.eyes.turn > 1)
+ assert.equal(f.trail.visible,true)
+ assert.ok(Math.max(...f.trail.rings.map(r=>r.width*REFERENCE_SCALE*24/315))>.6)
+ assert.equal(sampleFrame('spin',800,{referenceTiming:true}).eyes.turn,0,'原生时间轴保留，供独立参考核验')
 })
 
 test('B3 thinking 三点有相位差，不同步闪烁', () => {
@@ -344,23 +281,21 @@ test('B6 blocked 稳态不做抖动（参考里逐帧完全一致）', () => {
   assert.deepEqual(a.bang, b.bang, '感叹号的稳态几何不应随时间变化')
 })
 
-test('B7 done 的轨道随时间推进，且不会回到起点', () => {
-  const a = sampleFrame('orbit', 1500)
-  const b = sampleFrame('orbit', 2300)
-  const spins = (f) => f.orbits.rings.map((ring) => ring.spin)
-  const sa = spins(a)
-  const sb = spins(b)
-  assert.ok(sa.some((v, i) => Math.abs(v - sb[i]) > 0.1), '轨道必须真的在转')
-  const dirs = MOTION_SPEC.orbit.rings.map((ring) => Math.sign(ring.speed))
-  assert.ok(dirs.includes(1) && dirs.includes(-1), '轨道方向必须不同（参考里是交叉绕行）')
+test('B7 done 九圈转头及三圈翻滚，尾迹开放且长度变化', () => {
+ const a=sampleFrame('orbit',1500),b=sampleFrame('orbit',2300)
+ assert.notDeepEqual(a.orbits.rings,b.orbits.rings)
+ assert.ok(Math.abs(b.body.roll-a.body.roll)>100)
+ assert.ok(Math.abs(sampleFrame('orbit',4100).body.roll)>1000)
+ for(const r of b.orbits.rings)assert.ok(Math.abs(r.points.at(-1).l-r.points[0].l)<3.5)
 })
 
-test('B8 done 进入后持续运行：不会因为片段结束而变回普通 idle', () => {
-  for (const t of [1250, 5000, 30000, 120000]) {
-    const frame = sampleFrame('orbit', t)
-    assert.ok(hasOrbits(frame), t + 'ms 时仍应有轨道环绕')
-    assert.ok(hasBody(frame), t + 'ms 时仍应有头像')
-  }
+test('B8 done 收尾后继续下一轮庆祝，不落回 idle', () => {
+ for(const n of [0,1,5,20]) {
+  const f=sampleFrame('orbit',2000+n*MOTION_SPEC.orbit.cycleMs)
+  assert.ok(hasOrbits(f));assert.ok(hasBody(f));assert.equal(f.motion,'orbit')
+ }
+ const settle=sampleFrame('orbit',5000)
+ assert.equal(settle.motion,'orbit');assert.ok(hasBody(settle));assert.equal(hasOrbits(settle),false)
 })
 
 test('B9 相同输入采样两次得到完全相同的一帧（可重复）', () => {
@@ -529,11 +464,8 @@ test('E1 所有可见图形都在 1.5× 画布内（侧栏尺寸下不会被裁�
     assert.ok(Math.abs(y - BOT_CENTER) <= half, label + ' 的 y 越界：' + (y - BOT_CENTER).toFixed(1))
   }
   const orbit = sampleFrame('orbit', 3000)
-  for (const ring of orbit.orbits.rings) {
-    const split = orbitPoints(ring, BOT_CENTER, BOT_CENTER, 96)
-    for (const seg of [...split.back, ...split.front]) {
-      for (const p of seg) check(p[0], p[1], '轨道')
-    }
+  for (const ring of orbit.orbits.rings) for (const p of ring.points) {
+    check(BOT_CENTER+(p.x-BOT_CENTER)*REFERENCE_SCALE,BOT_CENTER+(p.y-BOT_CENTER)*REFERENCE_SCALE,'尾迹')
   }
   const dots = sampleFrame('tri-dot', 300)
   for (const item of dots.dots.items) {
@@ -549,7 +481,7 @@ test('E2 侧栏尺寸下每个图形仍有足够像素（不是糊成一点）',
   const pxPerUnit = BOT_SIZE / (210 * 1.5)
   const dotPx = MOTION_SPEC.triDot.diamond * D * pxPerUnit
   const bangBarPx = MOTION_SPEC.bang.barTopWidth * D * pxPerUnit
-  const orbitPx = MOTION_SPEC.orbit.width * D * pxPerUnit
+  const orbitPx = Math.max(...sampleFrame('orbit',2000,{size:BOT_SIZE}).orbits.rings.map(r=>r.width))*REFERENCE_SCALE*pxPerUnit
   // 旧门槛 1.5px 就是「点还在，但侧栏里看不出是三颗」的现状。思考点的验收
   // 改成小尺寸可读性目标：稳态单点 ≥2.9 CSS px（见 E6 的完整几何检查）。
   assert.ok(dotPx >= 2.9, '思考点直径应 ≥2.9px（侧栏可辨识），实测 ' + dotPx.toFixed(2))
@@ -567,13 +499,12 @@ test('E3 胶囊眼环是闭合且对称的（等待态不是随手画的直线�
   assert.ok(Math.abs(Math.max(...ys) - BOT_CENTER - 6) < 0.5, '粗细应是 ±width/2')
 })
 
-test('E5 拖尾紧贴身体边缘掠过（不是飘在远处的一根线）', () => {
-  const frame = sampleFrame('spin', MOTION_SPEC.spin.trailFromMs + MOTION_SPEC.spin.trailGrowMs)
-  const bodyRadius = D / 2
-  assert.ok(
-    frame.trail.radius > bodyRadius * 0.95 && frame.trail.radius < bodyRadius * 1.3,
-    '拖尾半径应略大于身体半径（' + (frame.trail.radius / bodyRadius).toFixed(2) + '×）',
-  )
+test('E5 尾迹半径和长度不同，不是等长同心弧', () => {
+ const ribbons=sampleFrame('spin',850).trail.rings
+ assert.ok(ribbons.length>=3&&ribbons.length<=5)
+ const radii=ribbons.map(r=>Math.max(...r.points.map(p=>Math.hypot(p.x-BOT_CENTER,p.y-BOT_CENTER))))
+ assert.ok(Math.max(...radii)-Math.min(...radii)>10)
+ assert.ok(radii.every(r=>r*REFERENCE_SCALE<D*.75))
 })
 
 // ── F. thinking 三点的小尺寸可读性 ────────────────────────────────────────
@@ -720,29 +651,18 @@ test('F3 reduced-motion 的静态三点沿用调整后的点径与间距', () =>
   assert.deepEqual(staticFrame('tri-dot'), stat, '静态帧必须稳定')
 })
 
-test('E4 工作彩带是五条并排的完整弧，不是五截越来越细的短线', () => {
-  const frame = sampleFrame('spin', MOTION_SPEC.spin.trailFromMs + MOTION_SPEC.spin.trailGrowMs)
-  const bands = trailBands(frame.trail, BOT_CENTER, BOT_CENTER, 5)
-  assert.equal(bands.length, 5)
-  assert.equal(new Set(bands.map((b) => b.color)).size, 5, '五段颜色互不相同')
-  const first = bands[0].points[0]
-  const r = Math.hypot(first[0] - BOT_CENTER, first[1] - BOT_CENTER)
-  assert.ok(Math.abs(r - frame.trail.radius) < 1, '拖尾落在规格半径上')
-  for (const band of bands) {
-    assert.deepEqual(band.points[0], first, '色带必须从同一角度起笔（径向错位由渲染层负责）')
-    assert.deepEqual(band.points.at(-1), bands[0].points.at(-1), '每种颜色都覆盖完整弧段')
-  }
+test('E4 工作尾迹有渐变色，每条弧的长度与深度独立', () => {
+ const ribbons=sampleFrame('spin',850).trail.rings
+ assert.ok(new Set(ribbons.map(r=>r.hue)).size>=3)
+ assert.ok(new Set(ribbons.map(r=>r.points.length)).size>1)
+ for(const r of ribbons){assert.ok(Math.abs(r.hueSpan)>=45);assert.ok(r.points.length<=48);assert.ok(Math.abs(r.points.at(-1).l-r.points[0].l)<3.5)}
 })
 
-test('E4b 工作彩带在 20px/16px 下有足够总厚度，转到任何方向都不溢出画布', () => {
-  const spec = MOTION_SPEC.spin
-  for (const size of [20, 16]) {
-    const pxPerUnit = size / (D * 1.5)
-    const thickness = spec.trailWidth * D * pxPerUnit
-    assert.ok(thickness >= size * 0.075, size + 'px 下彩带厚度不足：' + thickness)
-    assert.ok(spec.trailRadius - spec.trailWidth / 2 > 0.5, '彩带与脸的外沿应有间隙')
-    assert.ok(spec.trailRadius + spec.trailWidth / 2 < 0.75, '含线宽必须完整落在画布内')
-  }
-  const still = staticFrame('spin')
-  assert.equal(still.trail.width, sampleFrame('spin', 5000).trail.width, '静态和动态使用同一套可读尺寸')
+test('E4b 24px/20px/16px 沿用官网小尺寸加粗，静态帧来自同一动作', () => {
+ for(const size of [24,20,16]){
+  const frame=sampleFrame('spin',MOTION_SPEC.spin.staticMs,{size,referenceTiming:true})
+  const widths=frame.trail.rings.map(r=>r.width*REFERENCE_SCALE*size/315)
+  assert.ok(Math.max(...widths)>.8)
+  assert.deepEqual(staticFrame('spin',{size}),frame)
+ }
 })

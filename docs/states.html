@@ -30,14 +30,15 @@
 import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
 import { createBot, runBot } from '../src/grokbot/engine.js'
 import { PHASE_TO_MOTION } from '../src/mapping.js'
+import { BOT_SIZE } from '../src/widget/styles.js'
 
 const PHASES = [
   ['idle', '空闲', '圆头像 + 竖眼，慢转头与眨眼'],
-  ['working', '正在处理', '圆头像，甩头 + 短拖尾，随后持续张望'],
+  ['working', '正在处理', '完整转身 + 单平面渐变开放尾迹'],
   ['waiting', '正在等待', '圆头像 + 压扁上翘的横线眼'],
   ['blocked', '已阻止', '头像退出，主体是感叹号'],
   ['thinking', '思考', '头像退出，三颗点依次脉动'],
-  ['done', '完成', '头像 + 6 条彩色轨道前后穿插'],
+  ['done', '完成', '九圈转头 + 三圈翻滚 + 三平面渐变尾迹'],
 ]
 
 const PROJECT_INK = '#1084fe'
@@ -85,7 +86,7 @@ function render(target, phase, label, desc, size) {
 const big = grid('六态的实际形态（64px，同一身份色）')
 for (const [phase, label, desc] of PHASES) render(big, phase, label, desc, 64)
 
-const small = grid('同一只头像在侧栏里的真实尺寸（20px，BOT_SIZE）')
-for (const [phase] of PHASES) render(small, phase, '', '', 20)
+const small = grid('同一只头像在侧栏里的真实尺寸（' + BOT_SIZE + 'px，BOT_SIZE）')
+for (const [phase] of PHASES) render(small, phase, '', '', BOT_SIZE)
 </script>
 </body></html>
