@@ -21,7 +21,7 @@
 import { TB_EXPRESSIONS, TB_SHAPES } from './grokbot/data.js'
 import { createBot, runBot, setBotInk } from './grokbot/engine.js'
 import { LIFECYCLE, PHASE_TEXT, PHASE_TO_MOTION, SURFACE, surfaceOf, themeOf } from './mapping.js'
-import { IDENTITY_INKS, UNGROUPED_KEY, defaultInk, inkOfProject, normalizeColor, storeKey } from './palette.js'
+import { PICKER_INKS, UNGROUPED_KEY, defaultInk, inkOfProject, normalizeColor, storeKey } from './palette.js'
 import { collectSurfaces, collectWorkspaceFolders } from './dom.js'
 import { dshRawStateOf, fallbackPhase, mergePhase } from './dsh-state.js'
 import { COOLDOWN_MS, isActive, inkForRow } from './activity.js'
@@ -1004,7 +1004,7 @@ function boot() {
 
     const grid = document.createElement('div')
     grid.className = 'dsgb-palette-grid'
-    for (const item of IDENTITY_INKS) {
+    for (const item of PICKER_INKS) {
       const swatch = document.createElement('button')
       swatch.type = 'button'
       swatch.className = 'dsgb-swatch'
@@ -1601,7 +1601,7 @@ function boot() {
     ink(workspaceId) {
       return inkOfProject(workspaceId === undefined ? '' : workspaceId, dark, colors)
     },
-    palette: { inks: IDENTITY_INKS, surface: SURFACE, ungrouped: UNGROUPED_KEY },
+    palette: { inks: PICKER_INKS, surface: SURFACE, ungrouped: UNGROUPED_KEY },
     colors() {
       return { ...colors }
     },

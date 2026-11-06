@@ -1004,6 +1004,22 @@ test('点预设色：文件夹立刻更新，不等下一次轮询；文件夹�
   h.api.stop()
 })
 
+test('扩充色块同样走预设色提交链路：文件夹与 Buddy 一起换色', async () => {
+  const h = await boot()
+  const made = makeFolderSection(h.doc, 'proj-a')
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  clickColorEntry(h)
+  const green = paletteButton(h, '[aria-label="绿"]')
+  assert.notEqual(green, null, '调色板里应该有扩充的「绿」色块')
+  green.fire('click')
+  await h.settle()
+  assert.equal(folderInkOf(made.folder), '#22b573', '扩充色同样立刻落到文件夹')
+  const posts = h.fetchLog.filter((entry) => entry.method === 'POST' && entry.url.indexOf('/colors.json') !== -1)
+  assert.equal(posts.length, 1, '走同一条提交链路')
+  h.api.stop()
+})
+
 test('自定义 hex 与恢复默认都生效：恢复默认后文件夹回到 DSH 原生（不留任何插件痕迹）', async () => {
   const h = await boot()
   const made = makeFolderSection(h.doc, 'proj-a')

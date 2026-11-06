@@ -11,8 +11,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  EXTRA_INKS,
   IDENTITY_INKS,
   MIN_CONTRAST,
+  PICKER_INKS,
   adjustForSurface,
   contrast,
   defaultInk,
@@ -45,6 +47,35 @@ test('不同项目的默认色能区分开（8 个常见项目至少三种颜色
   const ids = ['acme', 'grokbot', 'design', 'infra', 'notes', 'dsh', 'web', 'cli']
   const set = new Set(ids.map((id) => defaultInk(id)))
   assert.ok(set.size >= 3, '8 个项目只取到 ' + set.size + ' 种颜色，太挤了')
+})
+
+test('调色板 = 官方 8 色 + 扩充 8 色，命名与色值保持同一套规则', () => {
+  assert.equal(IDENTITY_INKS.length, 8)
+  assert.equal(EXTRA_INKS.length, 8)
+  assert.equal(PICKER_INKS.length, 16)
+  assert.deepEqual(PICKER_INKS.slice(0, 8), IDENTITY_INKS, '官方色必须排在前面且顺序不变')
+  const ids = new Set()
+  const names = new Set()
+  const inks = new Set()
+  for (const item of PICKER_INKS) {
+    assert.match(item.id, /^[a-z]+$/, item.id)
+    assert.ok(item.name.length > 0, item.id + ' 缺中文名')
+    assert.equal(parseHex(item.ink), item.ink, item.id + ' 的墨色必须是小写 #rrggbb')
+    assert.equal(normalizeColor(item.id), item.ink, item.id + ' 应能按预设名解析')
+    assert.equal(ids.has(item.id), false, 'id 重复: ' + item.id)
+    assert.equal(names.has(item.name), false, '名字重复: ' + item.name)
+    assert.equal(inks.has(item.ink), false, '色值重复: ' + item.ink)
+    ids.add(item.id)
+    names.add(item.name)
+    inks.add(item.ink)
+  }
+})
+
+test('扩充色不参与默认发牌：defaultInk 仍只落在官方 8 色里', () => {
+  const extra = new Set(EXTRA_INKS.map((item) => item.ink))
+  for (const id of ['a', 'b', 'proj-1', '', 'workspace:中文', 'x'.repeat(60)]) {
+    assert.ok(!extra.has(defaultInk(id)), id + ' 默认色落到了扩充色 ' + defaultInk(id))
+  }
 })
 
 test('未分组走独立哈希域，不总是撞上同一个真实项目', () => {
@@ -83,6 +114,8 @@ test('颜色校验：只收合法 hex 与预设名白名单', () => {
   assert.equal(normalizeColor('9159fe'), '#9159fe')
   assert.equal(normalizeColor('#abc'), '#aabbcc')
   assert.equal(normalizeColor('purple'), '#9159fe')
+  assert.equal(normalizeColor('green'), '#22b573')
+  assert.equal(normalizeColor('墨绿'), null) // 中文名仍不是白名单键
   assert.equal(normalizeColor('蓝'), null) // 中文名不是白名单键
   assert.equal(normalizeColor('rgb(1,2,3)'), null)
   assert.equal(normalizeColor('javascript:alert(1)'), null)

@@ -37,6 +37,26 @@ export const IDENTITY_INKS = Object.freeze([
   { id: 'red', name: '红', ink: COLOR_NAMES.red },
 ])
 
+/**
+ * 扩充的 8 个调色板色：命名与官方身份色同构（英文小写 id + 单/双字中文名 + 小写 hex），
+ * 只用于 ⋯ 菜单里的调色板。**不参与 defaultInk 的哈希发牌** —— 官方色一旦改变数量
+ * 或顺序，所有项目的默认色都会被重新分配。
+ * @type {ReadonlyArray<{id: string, name: string, ink: string}>}
+ */
+export const EXTRA_INKS = Object.freeze([
+  { id: 'green', name: '绿', ink: COLOR_NAMES.green },
+  { id: 'forest', name: '墨绿', ink: COLOR_NAMES.forest },
+  { id: 'yellow', name: '黄', ink: COLOR_NAMES.yellow },
+  { id: 'sky', name: '天蓝', ink: COLOR_NAMES.sky },
+  { id: 'indigo', name: '靛', ink: COLOR_NAMES.indigo },
+  { id: 'magenta', name: '品红', ink: COLOR_NAMES.magenta },
+  { id: 'olive', name: '橄榄', ink: COLOR_NAMES.olive },
+  { id: 'slate', name: '灰', ink: COLOR_NAMES.slate },
+])
+
+/** 调色板里展示的全部色块：官方 8 色在前（顺序不变），扩充色在后。 */
+export const PICKER_INKS = Object.freeze([...IDENTITY_INKS, ...EXTRA_INKS])
+
 /** 未分组会话的哈希域。它不是一个真实 Workspace，单独给一个域避免总撞同一个色。 */
 export const UNGROUPED_KEY = 'ungrouped:'
 

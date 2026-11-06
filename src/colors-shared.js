@@ -7,8 +7,14 @@
  * @module dsh-grok-buddy/colors-shared
  */
 
-/** 预设色名白名单（官方 8 个身份色的名字）。 */
+/**
+ * 预设色名白名单。
+ *
+ * 前 8 个是官方身份色（x.ai 站点包里的 Bot ink 值，一字不改）；后 8 个是
+ * 扩充的调色板色，命名与色值格式完全一致，但不参与默认色的哈希发牌。
+ */
 export const COLOR_NAMES = Object.freeze({
+  // 官方 8 个身份色
   blue: '#1084fe',
   purple: '#9159fe',
   orange: '#ff9800',
@@ -17,6 +23,15 @@ export const COLOR_NAMES = Object.freeze({
   clay: '#97683d',
   teal: '#00bca6',
   red: '#ff263c',
+  // 扩充色：只进调色板，给 8 个官方色不够用的项目多一种选择
+  green: '#22b573',
+  forest: '#0f7a4d',
+  yellow: '#f2b51c',
+  sky: '#00a9e0',
+  indigo: '#5b5bd6',
+  magenta: '#c026d3',
+  olive: '#7a8f2a',
+  slate: '#6f7787',
 })
 
 /**
