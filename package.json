@@ -1,6 +1,6 @@
 {
   "name": "dsh-grok-buddy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Grok Bot's own face in your DSH sidebar: the GrokBot avatar shows each session's six runtime states — idle, working, waiting, blocked, thinking, done — with no extra UI. Color is project identity; motion is state.",
   "type": "module",
   "main": "lib/index.js",
