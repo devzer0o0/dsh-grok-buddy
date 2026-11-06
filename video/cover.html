@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+ *{margin:0;padding:0;box-sizing:border-box}
+ html,body{width:1920px;height:1080px;overflow:hidden;background:#0d0f13;color:#e9ecf2;
+   font-family:-apple-system,"PingFang SC","Hiragino Sans GB",sans-serif;-webkit-font-smoothing:antialiased}
+ .wrap{position:relative;width:1920px;height:1080px;overflow:hidden;
+   background:radial-gradient(90% 90% at 22% 32%,#1b2130 0%,#0d0f13 60%)}
+ .glow{position:absolute;width:1200px;height:1200px;left:-380px;top:-330px;border-radius:50%;
+   background:radial-gradient(circle,rgba(16,132,254,.30) 0%,rgba(16,132,254,0) 68%);filter:blur(10px)}
+ .grid{position:absolute;inset:0;opacity:.30;
+   background-image:linear-gradient(rgba(255,255,255,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px);
+   background-size:64px 64px;mask-image:radial-gradient(80% 80% at 30% 40%,#000 30%,transparent 78%)}
+ .left{position:absolute;left:120px;top:150px;width:1020px}
+ .kicker{display:inline-flex;align-items:center;gap:12px;font:600 26px/1 ui-monospace,Menlo,monospace;letter-spacing:.22em;
+   color:#7f8b9e;text-transform:uppercase;margin-bottom:34px}
+ .kicker i{width:9px;height:9px;border-radius:50%;background:#1084fe;display:block}
+ h1{font-size:118px;font-weight:700;letter-spacing:-.035em;line-height:1.02;
+   background:linear-gradient(180deg,#fff,#9fb0c9);-webkit-background-clip:text;background-clip:text;color:transparent}
+ .sub{margin-top:34px;font-size:52px;line-height:1.42;color:#b7c1d2}
+ .sub b{color:#fff;font-weight:600}
+ .states{display:flex;gap:18px;margin-top:60px;align-items:center}
+ .pill{display:flex;align-items:center;gap:14px;padding:16px 28px 16px 18px;border-radius:999px;
+   background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09)}
+ .pill .slot{width:34px;height:34px;display:flex;align-items:center;justify-content:center}
+ .pill span{font-size:27px;color:#dbe2ee}
+ .right{position:absolute;right:-60px;top:50%;transform:translateY(-50%);width:900px;height:900px;
+   display:flex;align-items:center;justify-content:center}
+ .ring{position:absolute;width:820px;height:820px;border-radius:50%;border:1px solid rgba(255,255,255,.07)}
+ .ring.b{width:640px;height:640px;border-color:rgba(16,132,254,.20)}
+ .badge{position:absolute;left:120px;bottom:96px;display:flex;align-items:center;gap:16px;
+   font:500 26px/1 ui-monospace,Menlo,monospace;color:#7c8798}
+ .badge em{font-style:normal;color:#1084fe}
+</style></head><body><div class="wrap">
+ <div class="glow"></div><div class="grid"></div>
+ <div class="left">
+   <div class="kicker"><i></i>DeepSeek Harness 插件</div>
+   <h1>dsh-grok-buddy</h1>
+   <div class="sub">把 Grok Bot 那张脸，<br>装进<b>会话列表</b>的那一行</div>
+   <div class="states" id="states"></div>
+ </div>
+ <div class="right"><div class="ring"></div><div class="ring b"></div><span id="big"></span></div>
+ <div class="badge"><em>6</em> 种运行状态 · 看脸就知道</div>
+</div>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
+import { createBot, runBot, setBotState } from '../src/grokbot/engine.js'
+const mk=(size,ink,eye)=>{const i=createBot({shape:TB_SHAPES.blob,expressions:TB_EXPRESSIONS,bodyFill:ink,eyeFill:eye,size});
+  const c=runBot(i,{now:()=>0,raf:()=>0,cancelRaf:()=>0});return {i,set:m=>setBotState(i,m),step:t=>c.step(t)}}
+const STATES=[['rest','空闲'],['spin','处理'],['half-lidded','等待'],['tri-dot','思考'],['bang','阻止'],['orbit','完成']]
+const host=document.getElementById('states')
+const bots=[]
+STATES.forEach(([m,label])=>{
+  const pill=document.createElement('div');pill.className='pill'
+  const slot=document.createElement('div');slot.className='slot'
+  const b=mk(34,'#1084fe','#141821');slot.appendChild(b.i.svg)
+  const s=document.createElement('span');s.textContent=label
+  pill.append(slot,s);host.appendChild(pill);bots.push(b)
+})
+const big=mk(560,'#1084fe','#0d0f13')
+document.getElementById('big').appendChild(big.i.svg)
+window.__t=0
+window.__render=(t)=>{window.__t=t;big.set('orbit');big.step(t*1000);bots.forEach((b,k)=>{b.set(STATES[k][0]);b.step(t*1000)})}
+window.__render(0.4)
+window.__ready=true
+</script></body></html>

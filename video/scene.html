@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>dsh-grok-buddy · 推广片</title>
+<style>
+  :root{--bg:#0d0f13;--panel:#15181e;--line:rgba(255,255,255,.085);--text:#e9ecf2;--muted:#8b93a1;--on:#1084fe}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1080px;height:1920px;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"PingFang SC","Hiragino Sans GB",sans-serif;-webkit-font-smoothing:antialiased}
+  .stage{position:fixed;inset:0;width:1080px;height:1920px;overflow:hidden;
+    background:radial-gradient(120% 80% at 50% 18%,#191d26 0%,#0d0f13 62%)}
+  .glow{position:absolute;width:1200px;height:1200px;left:-560px;top:-300px;border-radius:50%;
+    background:radial-gradient(circle,rgba(16,132,254,.16) 0%,rgba(16,132,254,0) 66%);pointer-events:none}
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:0;visibility:hidden;opacity:0;will-change:opacity,transform}
+  .kicker{font:600 20px/1 ui-monospace,Menlo,monospace;letter-spacing:.34em;color:var(--muted);
+    text-transform:uppercase;margin-bottom:34px}
+  .cap{position:absolute;left:0;right:0;bottom:132px;text-align:center;font-size:38px;line-height:1.45;
+    color:#dfe4ee;letter-spacing:.01em;text-shadow:0 2px 24px rgba(0,0,0,.6)}
+  .cap b{color:#fff;font-weight:600}
+  .mono{font-family:ui-monospace,Menlo,monospace}
+
+  /* S1 */
+  #s1 .bot-hero{width:400px;height:400px;display:flex;align-items:center;justify-content:center;margin-bottom:30px}
+  #s1 h1{font-size:96px;letter-spacing:-.03em;font-weight:700;
+    background:linear-gradient(180deg,#fff,#a8b3c7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #s1 p{margin-top:30px;font-size:42px;line-height:1.55;color:#9aa4b6;text-align:center}
+  #s1 p em{font-style:normal;color:#e9ecf2}
+
+  /* list */
+  .pane{width:820px;background:rgba(21,24,30,.92);border:1px solid var(--line);border-radius:22px;
+    padding:14px 0;box-shadow:0 40px 120px rgba(0,0,0,.55)}
+  .row{display:flex;align-items:center;gap:16px;height:74px;padding:0 22px}
+  .slot{width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;position:relative}
+  .dot{width:16px;height:16px;border-radius:50%}
+  .name{flex:1;font-size:26px;color:#dde3ee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tag{font:500 17px/1 ui-monospace,Menlo,monospace;color:#6d7686}
+  .row-sel{background:rgba(255,255,255,.045);border-radius:12px;margin:0 10px;padding:0 12px}
+
+  /* S4 */
+  #s4 .big{width:520px;height:520px;display:flex;align-items:center;justify-content:center}
+  #s4 .state-name{font-size:76px;font-weight:700;letter-spacing:.02em;margin-top:6px}
+  #s4 .state-desc{font-size:32px;color:var(--muted);margin-top:16px}
+  #s4 .pips{display:flex;gap:14px;margin-top:52px}
+  #s4 .pip{width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,.16)}
+
+  /* S5 */
+  #s5 .num{font:700 210px/1 -apple-system,sans-serif;letter-spacing:-.04em}
+  #s5 .num span{font-size:88px;color:var(--muted);margin-left:8px}
+  #s5 .row6{display:flex;gap:56px;margin-top:40px}
+  #s5 .cell{display:flex;flex-direction:column;align-items:center;gap:22px}
+  #s5 .cell .box{width:30px;height:30px;display:flex;align-items:center;justify-content:center}
+  #s5 .cell .lbl{font:500 21px/1 ui-monospace,Menlo,monospace;color:#8b93a1}
+  #s5 .ruler{position:absolute;bottom:236px;font:500 20px/1 ui-monospace,Menlo,monospace;color:#5d6675}
+
+  /* S6 */
+  #s6 .chips{display:grid;grid-template-columns:repeat(4,190px);gap:34px 26px;margin-top:6px}
+  #s6 .chip{display:flex;flex-direction:column;align-items:center;gap:16px}
+  #s6 .chip .sw{width:104px;height:104px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}
+  #s6 .chip .n{font-size:22px;color:#dfe4ee}
+  #s6 .chip .h{font:500 15px/1 ui-monospace,Menlo,monospace;color:#6d7686}
+
+  /* S7 */
+  #s7 .term{width:900px;background:#11151b;border:1px solid var(--line);border-radius:20px;overflow:hidden;
+    box-shadow:0 40px 120px rgba(0,0,0,.6)}
+  #s7 .bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line);
+    background:rgba(255,255,255,.03)}
+  #s7 .bar i{width:13px;height:13px;border-radius:50%;background:#2c323d;display:block}
+  #s7 pre{padding:34px 30px 40px;font:500 27px/1.75 ui-monospace,Menlo,monospace;color:#d8dfea;white-space:pre-wrap;word-break:break-all;min-height:250px}
+  #s7 .prompt{color:#1084fe}
+  #s7 .caret{display:inline-block;width:13px;height:30px;background:#1084fe;vertical-align:-5px;margin-left:4px}
+
+  /* S8 */
+  #s8 .wordmark{font-size:92px;font-weight:700;letter-spacing:-.03em;margin-top:10px;
+    background:linear-gradient(180deg,#fff,#9fabbe);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #s8 .repo{margin-top:34px;font:500 30px/1 ui-monospace,Menlo,monospace;color:#8fa6c9}
+  #s8 .meta{margin-top:22px;font-size:24px;color:#69717f;letter-spacing:.06em}
+  #s8 .bot-end{width:320px;height:320px;display:flex;align-items:center;justify-content:center}
+</style></head>
+<body><div class="stage">
+<div class="glow" id="glow"></div>
+
+<section class="scene" id="s1">
+  <div class="bot-hero"><span id="heroBot"></span></div>
+  <h1 id="s1t">dsh-grok-buddy</h1>
+  <p id="s1p">把 Grok Bot 那张脸<br>装进 <em>DeepSeek Harness</em> 的会话列表</p>
+</section>
+
+<section class="scene" id="s2">
+  <div class="kicker">BEFORE</div>
+  <div class="pane" id="paneBefore"></div>
+  <div class="cap">侧栏里每个会话，只占一个<b>彩色小圆点</b></div>
+</section>
+
+<section class="scene" id="s3">
+  <div class="kicker">AFTER</div>
+  <div class="pane" id="paneAfter"></div>
+  <div class="cap">装上一个插件，圆点变成一张<b>会动的脸</b></div>
+</section>
+
+<section class="scene" id="s4">
+  <div class="big"><span id="bigBot"></span></div>
+  <div class="state-name" id="stName">空闲</div>
+  <div class="state-desc" id="stDesc">等你回来</div>
+  <div class="pips" id="stPips"></div>
+</section>
+
+<section class="scene" id="s5">
+  <div class="num">20<span>px</span></div>
+  <div class="kicker" style="margin:6px 0 0">侧栏里的真实尺寸</div>
+  <div class="row6" id="row20"></div>
+  <div class="cap">位置、行高、槽位宽度，<b>一点没变</b></div>
+</section>
+
+<section class="scene" id="s6">
+  <div class="kicker">八种身份色</div>
+  <div class="chips" id="chips"></div>
+  <div class="cap"><b>颜色是项目身份</b>，动作才是运行状态</div>
+</section>
+
+<section class="scene" id="s7">
+  <div class="kicker">安装</div>
+  <div class="term"><div class="bar"><i></i><i></i><i></i></div>
+    <pre><span class="prompt">$ </span><span id="cmd"></span><span class="caret" id="caret"></span></pre></div>
+  <div class="cap">一条命令，然后<b>重启宿主</b></div>
+</section>
+
+<section class="scene" id="s8">
+  <div class="bot-end"><span id="endBot"></span></div>
+  <div class="wordmark">dsh-grok-buddy</div>
+  <div class="repo">github.com/devzer0o0/dsh-grok-buddy</div>
+  <div class="meta">BSD-3-Clause · Node ≥ 22 · DeepSeek Harness 插件</div>
+</section>
+
+</div>
+<script type="module">
+import { TB_EXPRESSIONS, TB_SHAPES } from '../src/grokbot/data.js'
+import { createBot, runBot, setBotState } from '../src/grokbot/engine.js'
+
+const clamp=(v,a=0,b=1)=>Math.min(b,Math.max(a,v))
+const seg=(t,a,b)=>clamp((t-a)/(b-a))
+const eo=x=>1-Math.pow(1-x,3)
+const eio=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2
+const $=id=>document.getElementById(id)
+
+function mkBot(size, ink, eye){
+  const inst=createBot({shape:TB_SHAPES.blob,expressions:TB_EXPRESSIONS,bodyFill:ink,eyeFill:eye,size})
+  const ctl=runBot(inst,{now:()=>0,raf:()=>0,cancelRaf:()=>{},transitionMs:260})
+  inst.svg.style.display='block'
+  return {inst,set:m=>setBotState(inst,m),step:t=>ctl.step(t)}
+}
+
+const STATES=[
+  {key:'idle',motion:'rest',name:'空闲',desc:'等你回来'},
+  {key:'working',motion:'spin',name:'正在处理',desc:'在跑工具'},
+  {key:'waiting',motion:'half-lidded',name:'正在等待',desc:'要你确认'},
+  {key:'blocked',motion:'bang',name:'已阻止',desc:'任务级错误停止'},
+  {key:'thinking',motion:'tri-dot',name:'思考',desc:'模型在跑'},
+  {key:'done',motion:'orbit',name:'完成',desc:'刚干完'},
+]
+const INKS=[
+  ['blob','#1084fe'],['hex','#9159fe'],['cloud','#ff9800'],['wedge','#ff309b'],
+  ['pebble','#ff6700'],['teardrop','#97683d'],['squircle','#00bca6'],['tablet','#ff263c'],
+]
+const ROWS=[
+  ['重构 colors 存储层','动 3 分钟前','#1084fe','idle'],
+  ['修掉 derive 的空指针','跑工具中','#00bca6','working'],
+  ['等你确认 rm -rf','待确认','#ff9800','waiting'],
+  ['motion 规格文档','思考中','#9159fe','thinking'],
+  ['六个测试挂了','已停止','#ff263c','blocked'],
+  ['整理 README','刚完成','#ff309b','done'],
+]
+
+// ---- 元素
+const heroBot=mkBot(380,'#1084fe','#0d0f13')
+$('heroBot').appendChild(heroBot.inst.svg)
+
+const bigBot=mkBot(460,'#1084fe','#0d0f13')
+$('bigBot').appendChild(bigBot.inst.svg)
+
+const endBot=mkBot(300,'#1084fe','#0d0f13')
+$('endBot').appendChild(endBot.inst.svg)
+
+const beforeRows=[], afterRows=[], afterBots=[]
+ROWS.forEach((r,i)=>{
+  const [name,tag,ink]=r
+  const mkRow=(dotEl)=>{
+    const row=document.createElement('div'); row.className='row'
+    const slot=document.createElement('div'); slot.className='slot'; slot.appendChild(dotEl)
+    const n=document.createElement('div'); n.className='name'; n.textContent=name
+    const g=document.createElement('div'); g.className='tag'; g.textContent=tag
+    row.append(slot,n,g); return row
+  }
+  const d=document.createElement('div'); d.className='dot'; d.style.background=ink
+  const br=mkRow(d); br.style.opacity=0; $('paneBefore').appendChild(br); beforeRows.push(br)
+
+  const b=mkBot(34,ink,'#15181e')
+  const ar=mkRow(b.inst.svg); ar.style.opacity=0; $('paneAfter').appendChild(ar)
+  afterRows.push(ar); afterBots.push(b)
+})
+$('paneBefore').children[0].classList.add('row-sel')
+
+const row20=[]
+STATES.forEach(s=>{
+  const cell=document.createElement('div'); cell.className='cell'
+  const box=document.createElement('div'); box.className='box'
+  const b=mkBot(20,'#1084fe','#0d0f13')
+  box.appendChild(b.inst.svg)
+  const lbl=document.createElement('div'); lbl.className='lbl'; lbl.textContent=s.key
+  cell.append(box,lbl); cell.style.opacity=0
+  $('row20').appendChild(cell); row20.push({cell,b})
+})
+
+INKS.forEach(([n,h])=>{
+  const chip=document.createElement('div'); chip.className='chip'; chip.style.opacity=0
+  const sw=document.createElement('div'); sw.className='sw'; sw.style.background=h
+  const nm=document.createElement('div'); nm.className='n'; nm.textContent=n
+  const hx=document.createElement('div'); hx.className='h'; hx.textContent=h
+  chip.append(sw,nm,hx); $('chips').appendChild(chip)
+})
+const chips=[...$('chips').children]
+
+STATES.forEach(()=>{ const p=document.createElement('div'); p.className='pip'; $('stPips').appendChild(p) })
+const pips=[...$('stPips').children]
+
+const CMD='dsh plugin --profile <PROFILE> add github:devzer0o0/dsh-grok-buddy'
+
+// ---- 时间轴
+const TL={s1:[0,3.4],s2:[3.4,9.4],s3:[9.4,15.2],s4:[15.2,26.8],s5:[26.8,32.2],s6:[32.2,37.2],s7:[37.2,42.2],s8:[42.2,47.0]}
+const FIN=TL.s4[0], STEP=(TL.s4[1]-TL.s4[0])/6
+const alpha=(t,r,fi=.4,fo=.4)=>Math.min(clamp((t-r[0])/fi),clamp((r[1]-t)/fo))
+
+function show(id,a,z){
+  const el=$(id)
+  el.style.opacity=a
+  el.style.transform=z&&z!==1?'scale('+z+')':'none'
+  el.style.visibility=a<=.002?'hidden':'visible'
+}
+
+function render(t){
+  // S1
+  show('s1',alpha(t,TL.s1,.5,.4),1+0.022*clamp((t-TL.s1[0])/(TL.s1[1]-TL.s1[0])))
+  const a1=eo(seg(t,.45,1.35)), a2=eo(seg(t,.85,1.75))
+  $('heroBot').style.transform='scale('+(0.86+0.14*a1)+')'
+  $('heroBot').style.opacity=clamp(seg(t,.15,.8))
+  $('s1t').style.opacity=a1; $('s1t').style.transform='translateY('+(1-a1)*26+'px)'
+  $('s1p').style.opacity=a2; $('s1p').style.transform='translateY('+(1-a2)*22+'px)'
+  heroBot.set('rest'); heroBot.step(t*1000)
+
+  // S2
+  show('s2',alpha(t,TL.s2,.45,.45),1+0.03*clamp((t-TL.s2[0])/(TL.s2[1]-TL.s2[0])))
+  beforeRows.forEach((r,i)=>{
+    const a=eo(seg(t,3.75+i*0.09,4.25+i*0.09))
+    r.style.opacity=a; r.style.transform='translateX('+(1-a)*-26+'px)'
+  })
+
+  // S3
+  show('s3',alpha(t,TL.s3,.45,.45),1+0.03*clamp((t-TL.s3[0])/(TL.s3[1]-TL.s3[0])))
+  afterRows.forEach((r,i)=>{
+    const a=eo(seg(t,9.75+i*0.09,10.25+i*0.09))
+    r.style.opacity=a; r.style.transform='translateX('+(1-a)*-26+'px)'
+  })
+  const swap=t>13.35
+  afterBots.forEach((b,i)=>{
+    const st=STATES[i].motion
+    b.set(swap?STATES[(i+2)%6].motion:st)
+    b.step(t*1000)
+  })
+
+  // S4
+  show('s4',alpha(t,TL.s4,.45,.5),1+0.028*clamp((t-TL.s4[0])/(TL.s4[1]-TL.s4[0])))
+  const idx=clamp(Math.floor((t-FIN)/STEP),0,5)
+  const st=STATES[idx]
+  bigBot.set(st.motion); bigBot.step(t*1000)
+  const pop=eo(seg(t,FIN+idx*STEP,FIN+idx*STEP+0.34))
+  $('stName').textContent=st.name; $('stDesc').textContent=st.desc
+  $('stName').style.opacity=.25+.75*pop
+  $('stDesc').style.opacity=.25+.75*pop
+  $('stName').style.transform='translateY('+(1-pop)*14+'px)'
+  pips.forEach((p,i)=>p.style.background=i===idx?'#1084fe':'rgba(255,255,255,.16)')
+
+  // S5
+  show('s5',alpha(t,TL.s5,.45,.45),1+0.026*clamp((t-TL.s5[0])/(TL.s5[1]-TL.s5[0])))
+  row20.forEach((r,i)=>{
+    const a=eo(seg(t,27.15+i*0.1,27.65+i*0.1))
+    r.cell.style.opacity=a; r.cell.style.transform='translateY('+(1-a)*20+'px)'
+    r.b.set(STATES[i].motion); r.b.step(t*1000)
+  })
+  const numA=eo(seg(t,26.95,27.55))
+  $('s5').querySelector('.num').style.transform='scale('+(0.9+0.1*numA)+')'
+  $('s5').querySelector('.num').style.opacity=numA
+
+  // S6
+  show('s6',alpha(t,TL.s6,.45,.45),1+0.026*clamp((t-TL.s6[0])/(TL.s6[1]-TL.s6[0])))
+  chips.forEach((c,i)=>{
+    const a=eo(seg(t,32.45+i*0.07,32.95+i*0.07))
+    c.style.opacity=a; c.style.transform='translateY('+(1-a)*26+'px)'
+  })
+
+  // S7
+  show('s7',alpha(t,TL.s7,.45,.45),1+0.026*clamp((t-TL.s7[0])/(TL.s7[1]-TL.s7[0])))
+  const typed=Math.floor(eio(seg(t,37.7,40.4))*CMD.length)
+  $('cmd').textContent=CMD.slice(0,typed)
+  $('caret').style.opacity=(Math.floor(t*2)%2===0||typed<CMD.length)?1:0
+  $('s7').querySelector('.term').style.transform='translateY('+(1-eo(seg(t,37.45,38.05)))*24+'px'
+
+  // S8
+  show('s8',alpha(t,TL.s8,.6,.5),1+0.03*clamp((t-TL.s8[0])/(TL.s8[1]-TL.s8[0])))
+  $('glow').style.transform='translate('+(60*Math.sin(t*0.28))+'px,'+(70*Math.cos(t*0.22))+'px)'
+  const a8=eo(seg(t,42.55,43.25))
+  endBot.set('orbit'); endBot.step(t*1000)
+  $('endBot').style.opacity=a8; $('endBot').style.transform='scale('+(0.85+0.15*a8)+')'
+  const a9=eo(seg(t,42.85,43.5))
+  $('s8').querySelector('.wordmark').style.opacity=a9
+  $('s8').querySelector('.wordmark').style.transform='translateY('+(1-a9)*20+'px)'
+  const a10=eo(seg(t,43.25,43.9))
+  $('s8').querySelector('.repo').style.opacity=a10
+  $('s8').querySelector('.meta').style.opacity=a10*.8
+}
+
+window.__render=render
+render(0)
+window.__ready=true
+</script></body></html>

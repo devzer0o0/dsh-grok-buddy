@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 *.tgz
 *.log
+
+# 推广片渲染产物（可用 video/render.mjs 重新生成）
+video/out/
