@@ -63,6 +63,7 @@ const modules = [
   path.join(SRC, 'widget', 'tool-cue.js'),
   path.join(SRC, 'widget', 'styles.js'),
   path.join(SRC, 'widget', 'index.js'),
+  path.join(SRC, 'widget', 'workspace-chrome.js'),
 ]
 
 let body = ''

@@ -367,6 +367,50 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 的原子写；文件损坏、字段缺失、非法颜色一律不崩，Buddy 退回哈希默认色、
 文件夹退回 DSH 原生色，并打一条 warn。
 
+### 新建文件夹自动配色与「只显示活跃会话」
+
+**自动配色**：项目行 ⋯ 菜单 →「颜色」→ 调色板底部的「新建文件夹自动配色（全局）」。
+打开后，**之后新建的** Workspace 文件夹会由宿主半侧从调色板 16 色中随机挑一个
+**没有被任何项目显式使用**的颜色；16 色全被占用时退回随机 hex，并且仍然避开已用集合。
+已有文件夹一律不重算、不改色，已经重复的手动配色也不会被插件修改。开关关闭后，
+新建文件夹恢复 DSH 原来的行为，已自动分配的颜色保留。
+
+- **全量来源**：新增 **GET /dsh-grok-buddy/workspaces.json**。宿主权威来源是
+  `ctx.workspaceRegistry.list()`（按 `workspaceIds` 顺序返回 `WorkspaceEntity`，
+  实体字段为 `id`），并兼容 `workspaces` / `workspace` / `workspaceController` /
+  `workspaceService` 的 `list()` / `snapshot()` / `getSnapshot()` / `items` /
+  `workspaces`。服务不存在或形状不认识时返回 501，页面显示缺失契约并
+  **拒绝自动配色**；不使用 DOM 已渲染行、虚拟列表或 600ms 稳定窗口猜「新建」。
+- **基线**：点击开启时**重新请求一次** `workspaces.json`，用当下的全量列表
+  一次性写入 `knownWorkspaces` + `baselineComplete`；只有基线完成之后出现的
+  ID 才会进入自动分配。列表 `phase` 未 ready 或 `state=loading` 时返回 503，
+  绝不当空列表。
+- **服务端守卫**：已有显式颜色的重复请求成功返回原色；属于 `knownWorkspaces`
+  或 `autoAssignedWorkspaces`、但当前没有颜色的请求返回成功跳过，不落色；
+  `baselineComplete` 未建立时直接拒绝。因此用户重置成默认色、旧请求、
+  另一窗口迟到请求都不能把旧文件夹重新自动染色。
+- 多个新建文件夹同时出现时，服务端在同一个同步段里「读已用集合 → 选色 → 写盘」，
+  第二个请求会看到第一个的结果，因此不会撞色。
+- 颜色写盘失败会回滚内存并返回错误；颜色已写入、但 known/assigned 记录写失败时
+  返回可重试错误，页面重试后走「已有颜色」分支补记，不会改其它项目的颜色。
+- 设置持久化在 `$DSH_HOME/dsh-grok-buddy/settings.json`（默认
+  `~/.dsh/dsh-grok-buddy/settings.json`），与 colors.json 一样是原子写；
+  文件损坏或字段非法时退回「关闭/未建立基线」，不阻塞页面。
+
+**只显示活跃会话**：侧栏「工作区」标题栏搜索图标左侧新增一个活动脉冲图标按钮。
+启用后只保留**已渲染会话行**中活跃的行，并隐藏没有活跃会话的分组；再次点击只摘掉
+插件自己的 `data-dsgb-active-only` 和行标记，恢复宿主原来的列表、搜索与筛选状态。
+
+活跃判定**复用头像已经算好的 `data-dsgb-tone`**（来自 [src/widget/activity.js](src/widget/activity.js)
+的 `isActive`：thinking / working / waiting / blocked、选中行、以及尚未消费的完成），
+不另写一套优先级。按钮用 `aria-pressed` 表示开关状态，`aria-label`
+为「只显示活跃会话」，悬停提示说明再次点击会显示全部。
+
+过滤层只读当前 DOM：折叠或尚未被虚拟列表渲染的会话不会被遍历；它们重新渲染时，
+widget 会重新挂载头像并写入 `data-dsgb-tone`，下一次过滤再决定显隐。隐藏行仍留在
+DOM 中时 widget 照常更新头像状态，所以不会因为被隐藏而停止更新；宿主真正卸载的行
+则在重新渲染后重建。该开关不修改宿主的数据层筛选、搜索或归档状态。
+
 ### 动作
 
 六个状态各对一个**动作**（动作名不是状态名）。动作的具体形态与量测过程见
