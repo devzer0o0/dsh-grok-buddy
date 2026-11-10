@@ -2,8 +2,14 @@
  * 工作区标题栏增强（独立模块，构建时拼进 widget.js）。
  *
  * 两个功能：
- *   1. 标题栏「只显示活跃会话」开关：复用 avatar 已经算好的 data-dsgb-tone
- *      （active / dormant），只加一层显示过滤，不重新实现六态判定；
+ *   1. 标题栏「只显示活跃会话」开关：活跃语义仍复用 avatar 已经算好的
+ *      isActive()（active / dormant），但判定来源不再只有「已渲染的会话行」：
+ *      · 已渲染的行 → 读 avatar 的 data-dsgb-tone；
+ *      · 折叠文件夹里的会话（宿主根本不渲染这些行）→ 查宿主全量成员表
+ *        workspaces.json 的 members（workspace.sessionIds 是归属的权威来源），
+ *        再让 widget 用同一套 displayOf + isActive 判定（不看 DOM）。
+ *      筛选期间临时展开「有活跃会话却折叠着」的文件夹，关闭筛选时折回；
+ *      用户亲手点过的文件夹不接管。
  *   2. 调色板里的「新建文件夹自动配色」开关：复用宿主颜色的公开端点，
  *      唯一色由服务端在 colors.json 现有的项目色集合上挑选，已有文件夹一律不动。
  *
@@ -24,6 +30,9 @@
   var WORKSPACES_POLL_MS = 1500
   var AUTO_RETRY_MS = 5000
   var AUTO_ERROR_THROTTLE_MS = 8000
+  /** 展开失败后的退避与次数上限：宿主没响应时不能每 500ms 硬点。 */
+  var EXPAND_RETRY_MS = 1200
+  var EXPAND_MAX_ATTEMPTS = 4
 
   var startedAt = Date.now()
   var stopped = false
@@ -35,7 +44,23 @@
   var known = new Set()
   var autoPending = new Set()
   var autoRetry = new Map()
-  var workspaces = { loaded: false, available: false, ids: [], error: '' }
+  var workspaces = { loaded: false, available: false, ids: [], members: [], hasMembers: false, membersReady: false, error: '' }
+  /** workspaceId → 该文件夹里有没有活跃会话（来自宿主全量成员表，与展开无关）。 */
+  var memberActive = new Map()
+  /** 归属可信的 workspaceId（未知归属不能当成空文件夹）。 */
+  var memberKnown = new Set()
+  /** 未分组（空 key）的归属是否可信 —— 成员表全部已知时才成立。 */
+  var ungroupedKnown = false
+  /** 我们替用户展开的文件夹（关筛选时折回）。 */
+  var autoExpanded = new Set()
+  /**
+   * 用户在**本轮筛选启用期间**亲手收起/展开过的文件夹：插件不再接管。
+   * 只在 activeOnly 期间记录，并在关闭筛选完成折回后整体清空 ——
+   * 不把筛选关闭期间的折叠、或上一轮的记录带进下一轮。
+   */
+  var userToggled = new Set()
+  /** workspaceId → { at, count }：展开退避（每轮重置）。 */
+  var expandAttempts = new Map()
   var workspacesLoading = false
   var lastWorkspacesPoll = 0
   var autoStatusText = ''
@@ -137,14 +162,28 @@
   function toggleActiveOnly() {
     activeOnly = !activeOnly
     if (activeOnly) {
+      // 新一轮筛选：上一轮的用户控制/重试记录全部作废，重新按当前事实接管。
+      // 普通模式下的折叠/展开从不写这些记录，所以不会带进这一轮。
+      userToggled.clear()
+      autoExpanded.clear()
+      expandAttempts.clear()
+      pendingToggle.clear()
       if (document.documentElement.getAttribute('data-dsgb-active-only') !== '1') {
         document.documentElement.setAttribute('data-dsgb-active-only', '1')
       }
-    } else if (document.documentElement.hasAttribute('data-dsgb-active-only')) {
-      document.documentElement.removeAttribute('data-dsgb-active-only')
+    } else {
+      if (document.documentElement.hasAttribute('data-dsgb-active-only')) {
+        document.documentElement.removeAttribute('data-dsgb-active-only')
+      }
+      // 关闭筛选：先撤掉过滤属性，再把插件临时展开的文件夹折回。
+      // 展开状态是宿主的前端本地状态，插件不留任何持久改动。
+      applyFilter()
+      restoreExpansion()
+      // 折回完成 → 这一轮周期结束，用户控制记录不带到下一轮。
+      userToggled.clear()
     }
     updateHeaderButton()
-    applyFilter()
+    if (activeOnly) applyFilter()
   }
 
   function ensureHeaderButton() {
@@ -180,7 +219,7 @@
   // ── 活跃过滤 ────────────────────────────────────────────────────────────
 
   /**
-   * 活跃语义唯一来源：widget 已经按 isActive() 把结果写在 avatar 的
+   * 已渲染行的活跃语义：widget 已经按 isActive() 把结果写在 avatar 的
    * data-dsgb-tone（active / dormant）上。这里只读，不重新判断。
    */
   function rowIsActive(row) {
@@ -190,6 +229,293 @@
     // tone 可能落后一个轮询；宿主的选中状态永远算活跃，避免把当前行藏掉。
     if (row.getAttribute('aria-selected') === 'true') return true
     return false
+  }
+
+  /** 取类名字符串（SVG 的 className 是对象）。 */
+  function classOf(node) {
+    if (node === null || node === undefined) return ''
+    var cls = node.className
+    if (typeof cls === 'string') return cls
+    if (cls !== null && typeof cls === 'object' && typeof cls.baseVal === 'string') return cls.baseVal
+    return ''
+  }
+
+  /** 项目行 data-row-key="workspace:<id>" → id；不是项目行返回 null。 */
+  function workspaceIdOfRow(row) {
+    if (row === null || row === undefined || typeof row.getAttribute !== 'function') return null
+    var key = row.getAttribute('data-row-key')
+    if (typeof key !== 'string' || key.indexOf('workspace:') !== 0) return null
+    return key.slice('workspace:'.length)
+  }
+
+  /** 分区**自己的**项目行（跳过嵌套分区里的那些）。 */
+  function sectionRowOf(section) {
+    if (section === null || section === undefined) return null
+    var rows = section.querySelectorAll('[data-row-key^="workspace:"]')
+    for (var i = 0; i < rows.length; i += 1) {
+      var cursor = rows[i].parentElement
+      var owner = null
+      for (var depth = 0; cursor !== null && cursor !== undefined && depth < 12; depth += 1) {
+        if (/groupSection/.test(classOf(cursor))) {
+          owner = cursor
+          break
+        }
+        cursor = cursor.parentElement
+      }
+      if (owner === section) return rows[i]
+    }
+    return null
+  }
+
+  /** 按 workspaceId 找当前渲染出来的项目行。 */
+  function findWorkspaceRow(workspaceId) {
+    var rows = document.querySelectorAll('[data-row-key^="workspace:"]')
+    for (var i = 0; i < rows.length; i += 1) {
+      if (workspaceIdOfRow(rows[i]) === workspaceId) return rows[i]
+    }
+    return null
+  }
+
+  /**
+   * 用宿主全量成员表重算「每个文件夹里有没有活跃会话」。
+   *
+   * 这一步**完全不看 DOM**：折叠的文件夹没有子行，但 workspace.sessionIds 里
+   * 的会话仍然存在。判定交给 widget 的 api.activity()，它走的是与头像完全
+   * 相同的 semanticOf → displayOf → isActive 链路，不新增状态规则。
+   */
+  function refreshMemberActivity() {
+    if (stopped) return
+    if (!workspaces.hasMembers || api === null || typeof api.activity !== 'function') {
+      if (memberActive.size > 0) memberActive.clear()
+      if (memberKnown.size > 0) memberKnown.clear()
+      ungroupedKnown = false
+      return
+    }
+    var all = []
+    var assigned = new Set()
+    // 只有**每一条**都真的给出 sessionIds，未分组集合才算确定；
+    // 任何一条归属未知，就不能把「不在已知成员里」当成「未分组」。
+    var allKnown = workspaces.members.length > 0
+    for (var i = 0; i < workspaces.members.length; i += 1) {
+      var memberEntry = workspaces.members[i]
+      if (memberEntry.known !== true) {
+        allKnown = false
+        continue
+      }
+      var list = memberEntry.sessionIds
+      for (var j = 0; j < list.length; j += 1) {
+        all.push(list[j])
+        assigned.add(list[j])
+      }
+    }
+    // 未分组：宿主把「不属于任何 workspace」的会话放进 key 为空的分组。
+    // 归属仍以成员表为准 —— 登记表里有、但不在任何 sessionIds 里的才候选。
+    var unassigned = []
+    var trackedOk = false
+    if (typeof api.knownSessions === 'function') {
+      var tracked = []
+      try {
+        tracked = api.knownSessions()
+      } catch (err) {
+        tracked = []
+      }
+      if (Array.isArray(tracked)) {
+        trackedOk = true
+        for (var t = 0; t < tracked.length; t += 1) {
+          var id = tracked[t]
+          if (typeof id === 'string' && id !== '' && !assigned.has(id)) unassigned.push(id)
+        }
+      }
+    }
+    var facts
+    try {
+      facts = api.activity(all.concat(unassigned))
+    } catch (err) {
+      return
+    }
+    if (facts === null || typeof facts !== 'object') return
+    memberActive.clear()
+    memberKnown.clear()
+    for (var m = 0; m < workspaces.members.length; m += 1) {
+      var member = workspaces.members[m]
+      // 归属未知的条目**不写结论**：memberActive 里没有它，页面据此保持可见。
+      if (member.known !== true) continue
+      memberKnown.add(member.workspaceId)
+      var active = false
+      for (var n = 0; n < member.sessionIds.length; n += 1) {
+        var fact = facts[member.sessionIds[n]]
+        if (fact !== undefined && fact !== null && fact.active === true) {
+          active = true
+          break
+        }
+      }
+      memberActive.set(member.workspaceId, active)
+    }
+    // 未分组（data-row-key="workspace:"，id 为空串）：只有成员表全部已知
+    // 且登记表可读时，才能确定「谁不属于任何文件夹」—— 否则是未知，保持可见。
+    ungroupedKnown = allKnown && trackedOk
+    if (ungroupedKnown) {
+      var ungroupedActive = false
+      for (var u = 0; u < unassigned.length; u += 1) {
+        var rowFact = facts[unassigned[u]]
+        if (rowFact !== undefined && rowFact !== null && rowFact.active === true) {
+          ungroupedActive = true
+          break
+        }
+      }
+      memberActive.set('', ungroupedActive)
+    }
+  }
+
+  /** 程序化点击（展开/折回）期间不把这次点击记成「用户亲手切换」。 */
+  var programmatic = false
+  /**
+   * 用户刚点过、还没判定完的行：workspaceId → 点击前的 aria-expanded。
+   *
+   * 宿主的展开状态由 React 在事件回调之后才渲染，点击那一刻读不到新值，
+   * 所以这里先挂起，等下一帧再比对「到底变没变」。挂起期间不允许自动展开
+   * 这一行，避免「用户折叠 → 我们立刻又展开」的闪烁。
+   */
+  var pendingToggle = new Map()
+
+  function clickRow(row) {
+    programmatic = true
+    try {
+      row.click()
+    } catch (err) {}
+    programmatic = false
+  }
+
+  /** 下一帧（渲染提交之后）执行；没有 rAF 时退回 setTimeout。 */
+  function nextFrame(fn) {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn)
+    else setTimeout(fn, 16)
+  }
+
+  /**
+   * 把「有活跃会话却折叠着」的文件夹临时展开。
+   *
+   * 只点宿主自己的项目行（onToggle），不伪造展开状态。
+   * 未分组分区（data-row-key="workspace:"，id 为空串）在宿主里同样是一个
+   * 可折叠的 treeitem（UngroupedProjectRow 走同一个 ProjectRow，带
+   * role=treeitem / aria-expanded / onClick:onToggle），所以这里**不排除空 key**：
+   * 它一旦被检测到有活跃会话，也要临时展开，否则就是「检测到了却永远不展示」。
+   *
+   * 不接管的三种情况：本轮筛选里用户亲手切换过、刚点过还在等渲染结果
+   * （pendingToggle）、以及重试次数用尽。
+   */
+  function expandForActive() {
+    if (stopped || !activeOnly) return
+    var rows = document.querySelectorAll('[data-row-key^="workspace:"]')
+    var now = Date.now()
+    for (var i = 0; i < rows.length; i += 1) {
+      var row = rows[i]
+      var workspaceId = workspaceIdOfRow(row)
+      // null = 不是项目行；空串是合法的「未分组」分组，不能跳过。
+      if (workspaceId === null) continue
+      if (row.getAttribute('aria-expanded') !== 'false') {
+        // 已经展开（含我们自己展开成功）：把退避计数清掉，
+        // 这样它以后再次被折叠时仍能被重新展开。
+        if (autoExpanded.has(workspaceId)) expandAttempts.delete(workspaceId)
+        continue
+      }
+      if (memberActive.get(workspaceId) !== true) continue
+      if (userToggled.has(workspaceId)) continue
+      // 用户刚点过这一行：等下一帧的 aria-expanded 比对结果，别抢在中间展开。
+      if (pendingToggle.has(workspaceId)) continue
+      var attempt = expandAttempts.get(workspaceId)
+      if (attempt !== undefined) {
+        if (attempt.count >= EXPAND_MAX_ATTEMPTS) continue
+        if (now - attempt.at < EXPAND_RETRY_MS) continue
+      }
+      expandAttempts.set(workspaceId, { at: now, count: attempt === undefined ? 1 : attempt.count + 1 })
+      autoExpanded.add(workspaceId)
+      clickRow(row)
+    }
+  }
+
+  /**
+   * 关闭筛选时把我们替用户展开的文件夹折回。
+   *
+   * 只折回「仍然展开着、且不是用户在本轮里亲手切换过」的那些 —— 用户自己
+   * 展开的、或用户在我们展开后又手动折叠的，都不动。未分组的空 key 同样处理。
+   */
+  function restoreExpansion() {
+    if (autoExpanded.size === 0) {
+      expandAttempts.clear()
+      pendingToggle.clear()
+      return
+    }
+    var ids = []
+    autoExpanded.forEach(function (id) {
+      ids.push(id)
+    })
+    autoExpanded.clear()
+    expandAttempts.clear()
+    pendingToggle.clear()
+    for (var i = 0; i < ids.length; i += 1) {
+      var workspaceId = ids[i]
+      if (userToggled.has(workspaceId)) continue
+      var row = findWorkspaceRow(workspaceId)
+      if (row === null) continue
+      if (row.getAttribute('aria-expanded') !== 'true') continue
+      clickRow(row)
+    }
+  }
+
+  /**
+   * 用户动手点了项目行 —— 但**是不是真的切换了展开状态，要等渲染后才知道**。
+   *
+   * 宿主是 React：onClick 里只 setState，aria-expanded 要下一次提交才更新，
+   * 点的那一瞬间读到的还是旧值。所以这里只把「点击前值」挂起，下一帧再比对：
+   *   · 变了  → 这确实是用户亲手切换，本文件夹让出控制权；
+   *   · 没变  → 只是点了 ⋯ 菜单 / 新建按钮之类的行内控件，不算切换。
+   * 只在 activeOnly 期间记录 —— 普通模式下的折叠/展开不进入这一轮的控制记录。
+   */
+  function onDocumentClick(event) {
+    if (stopped || programmatic || !activeOnly) return
+    var target = event.target
+    if (target === null || target === undefined || typeof target.closest !== 'function') return
+    var row = target.closest('[data-row-key^="workspace:"]')
+    if (row === null) return
+    // 不按「点的是不是行内按钮」猜：⋯ 菜单、新建按钮是否也触发 onToggle
+    // 由宿主决定，猜错就会漏记用户操作。这里只认**实际结果** ——
+    // 事件前后 aria-expanded 真的变了才算用户切换。
+    var workspaceId = workspaceIdOfRow(row)
+    if (workspaceId === null) return
+    pendingToggle.set(workspaceId, { row: row, before: row.getAttribute('aria-expanded') })
+    // 宿主是 React：setState 之后要等提交才写 aria-expanded。等两帧仍没变，
+    // 才认定这次点击没有改变展开状态（例如只是打开了 ⋯ 菜单）。
+    // 读值一律按 workspaceId 找**当前**的行：React 可能已把节点换掉，
+    // 盯着旧节点会永远读不到新值，从而漏记用户的切换。
+    var settle = function (left) {
+      var pending = pendingToggle.get(workspaceId)
+      if (pending === undefined) return
+      if (stopped || !activeOnly) {
+        pendingToggle.delete(workspaceId)
+        return
+      }
+      var live = findWorkspaceRow(workspaceId)
+      var after = (live === null ? pending.row : live).getAttribute('aria-expanded')
+      if (after === pending.before) {
+        if (left > 0) {
+          nextFrame(function () {
+            settle(left - 1)
+          })
+          return
+        }
+        pendingToggle.delete(workspaceId)
+        return
+      }
+      pendingToggle.delete(workspaceId)
+      // 真的变了：本轮里这个文件夹的展开状态归用户。
+      userToggled.add(workspaceId)
+      autoExpanded.delete(workspaceId)
+      expandAttempts.delete(workspaceId)
+    }
+    nextFrame(function () {
+      settle(1)
+    })
   }
 
   function applyFilter() {
@@ -205,6 +531,7 @@
       }
       return
     }
+    refreshMemberActivity()
     var rows = document.querySelectorAll('[data-row-key^="session:"]')
     var sections = new Map()
     for (var i = 0; i < rows.length; i += 1) {
@@ -221,7 +548,28 @@
     var groups = document.querySelectorAll('[class*="groupSection"]')
     for (var j = 0; j < groups.length; j += 1) {
       var group = groups[j]
-      if (!sections.has(group)) {
+      var groupActive = sections.get(group) === true
+      // 折叠分区没有子行，但成员表知道它按住哪些会话 —— 这里补上判定。
+      // 未分组分区的 data-row-key 是 "workspace:"（id 为空串），同样要查成员表。
+      var projectRow = sectionRowOf(group)
+      var groupWorkspaceId = projectRow === null ? null : workspaceIdOfRow(projectRow)
+      if (!groupActive && groupWorkspaceId !== null && memberActive.get(groupWorkspaceId) === true) {
+        groupActive = true
+      }
+      if (!groupActive) {
+        // 「归属未知」≠「确定为空」：读不到成员表、条目没给 sessionIds、
+        // 或未分组集合无法确定时，一律保持可见 —— 宁可多显示，也不能因为
+        // 读不到归属就把折叠文件夹全判成空。
+        var ownershipKnown =
+          groupWorkspaceId === null
+            ? false
+            : groupWorkspaceId === ''
+              ? ungroupedKnown
+              : memberKnown.has(groupWorkspaceId)
+        if (!ownershipKnown && !sections.has(group)) {
+          if (group.hasAttribute('data-dsgb-active-empty')) group.removeAttribute('data-dsgb-active-empty')
+          continue
+        }
         // 没有会话行的叶分组（空 Workspace）也属于「没有活跃会话」；
         // 但带嵌套 groupSection 的容器不能一起隐藏，否则会连带隐藏里面的活跃分组。
         if (group.querySelector('[class*="groupSection"]') !== null) {
@@ -231,12 +579,9 @@
         }
         continue
       }
-      if (sections.get(group) === true) {
-        if (group.hasAttribute('data-dsgb-active-empty')) group.removeAttribute('data-dsgb-active-empty')
-      } else if (group.getAttribute('data-dsgb-active-empty') !== '1') {
-        group.setAttribute('data-dsgb-active-empty', '1')
-      }
+      if (group.hasAttribute('data-dsgb-active-empty')) group.removeAttribute('data-dsgb-active-empty')
     }
+    expandForActive()
   }
 
 
@@ -344,7 +689,37 @@
               seen.add(id)
               ids.push(id)
             }
-            return ids
+            // members 是宿主 registry 的 workspace.sessionIds 投影 ——
+            // 「哪个会话属于哪个文件夹」的权威来源，与侧栏有没有渲染子行无关。
+            //
+            // 每条都带 known：只有宿主真的给出 sessionIds 数组，才能说「这个文件夹
+            // 按住这些会话」；known=false 表示归属未知。未知**不是**空文件夹 ——
+            // 页面必须把它保持可见，绝不能因为读不到就判空隐藏。
+            var members = []
+            var hasMembers = Array.isArray(body.members)
+            var allKnown = hasMembers && body.members.length > 0
+            if (hasMembers) {
+              for (var j = 0; j < body.members.length; j += 1) {
+                var entry = body.members[j]
+                if (entry === null || typeof entry !== 'object') continue
+                if (typeof entry.workspaceId !== 'string' || entry.workspaceId === '') continue
+                // 新宿主显式给 known；旧宿主没有该字段时，数组本身就是可信信号。
+                var known = typeof entry.known === 'boolean' ? entry.known === true : Array.isArray(entry.sessionIds)
+                if (!known) allKnown = false
+                var list = known && Array.isArray(entry.sessionIds) ? entry.sessionIds : []
+                var sessionIds = []
+                for (var k = 0; k < list.length; k += 1) {
+                  var sessionId = list[k]
+                  if (typeof sessionId !== 'string' || sessionId === '') continue
+                  sessionIds.push(sessionId)
+                }
+                members.push({ workspaceId: entry.workspaceId, sessionIds: sessionIds, known: known })
+              }
+            }
+            var membersReady = typeof body.membersReady === 'boolean' ? body.membersReady === true : allKnown
+            // 服务端说就绪、但条目自己不可信时以条目为准 —— 两个信号取更保守的那个。
+            if (!allKnown) membersReady = false
+            return { ids: ids, members: members, hasMembers: hasMembers, membersReady: membersReady }
           })
       })
   }
@@ -353,16 +728,19 @@
     if (stopped || workspacesLoading) return
     workspacesLoading = true
     fetchWorkspaceIds()
-      .then(function (ids) {
+      .then(function (roster) {
         workspacesLoading = false
         if (stopped) return
         workspaces.loaded = true
         workspaces.available = true
-        workspaces.ids = ids
+        workspaces.ids = roster.ids
+        workspaces.members = roster.members
+        workspaces.hasMembers = roster.hasMembers
         workspaces.error = ''
         updatePaletteToggle()
         maybeBaseline()
         reconcileFolders()
+        refreshMemberActivity()
       })
       .catch(function (error) {
         workspacesLoading = false
@@ -370,6 +748,9 @@
         workspaces.loaded = true
         workspaces.available = false
         workspaces.ids = []
+        workspaces.members = []
+        workspaces.hasMembers = false
+        memberActive.clear()
         workspaces.error = '读取 Workspace 全量列表失败：' + (error !== null && error !== undefined && error.message !== undefined ? error.message : '请稍后重试')
         updatePaletteToggle()
       })
@@ -687,6 +1068,8 @@
 
   function cleanup() {
     if (stopped) return
+    // 先折回插件临时展开的文件夹，再摘属性 —— 卸载不留展开副作用。
+    restoreExpansion()
     stopped = true
     if (timer !== null) clearInterval(timer)
     timer = null
@@ -699,6 +1082,7 @@
     if (observer !== null) observer.disconnect()
     observer = null
     document.removeEventListener('visibilitychange', onVisibility)
+    document.removeEventListener('click', onDocumentClick, true)
     document.documentElement.removeAttribute('data-dsgb-active-only')
     if (headerButton !== null && headerButton.parentNode !== null) headerButton.parentNode.removeChild(headerButton)
     headerButton = null
@@ -740,6 +1124,8 @@
       attributeFilter: ['data-dsgb-tone', 'data-row-key', 'aria-selected'],
     })
     document.addEventListener('visibilitychange', onVisibility)
+    // 用户亲手点过项目行 → 该文件夹的展开状态归用户，插件不再接管。
+    document.addEventListener('click', onDocumentClick, true)
     tick()
   }
 

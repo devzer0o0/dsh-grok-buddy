@@ -427,6 +427,58 @@ function boot() {
   }
 
   /**
+   * **不看 DOM** 的活跃判定 —— 折叠文件夹里的会话专用。
+   *
+   * 宿主对折叠分区根本不渲染子行（不是 display:none），所以那里读不到头像的
+   * data-dsgb-tone。这里对给定会话走与头像**完全相同**的一条链路：
+   * semanticOf → displayOf（row 传 null，融合自动退回插件事实）→ isActive。
+   * 不新增任何状态规则，只是把同一套语义用在「没有行」的会话上。
+   *
+   * 完成生命周期与渲染行共用一份记录（同一 completionKey），所以「在折叠状态
+   * 下完成 → 展开后看到已经凉了」与「展开状态下完成」表现一致。
+   *
+   * @param {string[]} sessionIds 会话 id 列表。
+   * @param {number} [now] 判定时刻（默认当前）。
+   * @returns {Record<string, {phase: string, active: boolean, reason: string}>} 逐会话事实。
+   */
+  function activityOf(sessionIds, now) {
+    const out = Object.create(null)
+    if (!Array.isArray(sessionIds)) return out
+    const at = typeof now === 'number' ? now : Date.now()
+    for (const sessionId of sessionIds) {
+      if (typeof sessionId !== 'string' || sessionId === '') continue
+      const display = displayOf({ sessionId, host: null, selected: false, workspaceId: '', surface: 'roster', slot: null })
+      // 首次见到这条完成就等于「这一轮从头开始展示」：与渲染行首次挂载同义，
+      // 否则 done 没有锚点会永远算活跃。
+      const lifecycle = display.completionKey === '' ? undefined : lifecycleOf(display.completionKey)
+      const consumed = lifecycle !== undefined && typeof lifecycle.consumedAt === 'number'
+      const seenAt = lifecycle === undefined ? undefined : lifecycle.viewedAt
+      // entry 在「登记表里没有这个会话」时是 undefined（不是 null）——
+      // 这里必须两种都挡掉，否则读 completedAt 会抛。
+      const completedAt =
+        display.entry !== null && display.entry !== undefined && typeof display.entry.completedAt === 'number'
+          ? display.entry.completedAt
+          : undefined
+      out[sessionId] = {
+        phase: display.phase,
+        active: isActive(
+          {
+            phase: display.phase,
+            selected: false,
+            completedAt,
+            observedAt: lifecycle === undefined ? display.observedAt : lifecycle.observedAt,
+            seenAt,
+            consumed,
+          },
+          at,
+        ),
+        reason: display.reason,
+      }
+    }
+    return out
+  }
+
+  /**
    * 一个会话的**共享语义**：每次同步先算一次，再投影到各表面。
    *
    * 这样「第一个表面渲染时顺手消费、第二个表面立刻看到不同状态」不会发生，
@@ -1639,6 +1691,19 @@ function boot() {
     sync() {
       syncRows()
       decorateMenus()
+    },
+    /**
+     * 不看 DOM 的活跃判定（折叠文件夹里的会话用）。
+     *
+     * 与头像同一条链路：semanticOf → displayOf → isActive。工作区标题栏的
+     * 「只显示活跃会话」用它覆盖宿主没渲染的会话，不另立状态规则。
+     */
+    activity(sessionIds, now) {
+      return activityOf(sessionIds, now)
+    },
+    /** 登记表里已知的会话 id（只读；用于把「不属于任何文件夹」的会话算出来）。 */
+    knownSessions() {
+      return [...byId.keys()]
     },
     probe: collectProbe,
     /** 打开一次性采样窗口（毫秒，不超过 60s）。 */
