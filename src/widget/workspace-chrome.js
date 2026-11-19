@@ -86,11 +86,23 @@
       '.dsgb-active-toggle{' +
         'box-sizing:border-box;width:28px;height:28px;flex:none;display:inline-flex;align-items:center;' +
         'justify-content:center;margin:0 0 0 auto;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);' +
-        'background:transparent;color:var(--dsw-alias-label-secondary,#5f6368);cursor:pointer}' ,
-      '.dsgb-active-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}',
+        'background:transparent;color:var(--dsw-alias-label-secondary,#5f6368);cursor:pointer;' +
+        'position:relative;touch-action:manipulation;-webkit-tap-highlight-color:transparent}' ,
+      // 命中区：视觉尺寸不变，用伪元素向外扩。标题栏是 overflow:hidden 且只有 36px 高，
+      // 所以纵向扩出的部分会被裁掉，实际命中高度≈标题栏高度；右侧只扩 2px，
+      // 再往右就是宿主的搜索按钮，扩多了会抢走它的点击。
+      '.dsgb-active-toggle::after{content:"";position:absolute;inset:-4px -2px -4px -4px;border-radius:inherit}',
+      // hover 只在真有指针的设备上生效，触摸设备不会留下粘滞高亮。
+      '@media (hover:hover){.dsgb-active-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}}',
       '.dsgb-active-toggle[aria-pressed="true"]{' +
         'color:var(--dsw-alias-state-business-primary,#1084fe);' +
         'background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}',
+      // 触摸设备 / 窄视口（移动端抽屉）：按钮放大到标题栏满高，图标同步放大，
+      // 按下即给反馈 —— 触摸没有 hover，不给 :active 就等于点了没反应。
+      '@media (hover:none),(pointer:coarse),(width<=480px){' +
+        '.dsgb-active-toggle{width:36px;height:36px;margin-right:2px}' +
+        '.dsgb-active-toggle svg{width:18px;height:18px}' +
+        '.dsgb-active-toggle:active{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.2))}}',
       '.dsgb-active-toggle:focus-visible{' +
         'outline:var(--dsw-focus-ring-width,2px) solid ' +
         'var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#1084fe));outline-offset:-2px}',

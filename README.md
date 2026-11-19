@@ -406,6 +406,11 @@ SVG（尺寸、占位、viewBox、描边、开合造型全部原样），只是�
 启用后只保留活跃的会话行，并隐藏没有活跃会话的分组；再次点击摘掉插件自己的
 `data-dsgb-active-only` 和行标记，恢复宿主原来的列表、搜索与筛选状态。
 
+按钮在移动端（触摸设备与窄视口）同样可用：视觉尺寸不变，命中区用伪元素向外扩，
+触摸设备与 `width<=480px` 下按钮放大到标题栏满高（36px）、图标同步放大到 18px，
+并补 `:active` 按下反馈（触摸没有 hover，否则点了像没反应）。`hover` 样式只在
+`(hover:hover)` 下生效，触摸设备不会留下粘滞高亮。搜索框展开时按钮仍然让位隐藏。
+
 活跃判定**复用头像已经算好的 `isActive`**（来自 [src/widget/activity.js](src/widget/activity.js)：
 thinking / working / waiting / blocked、选中行、以及尚未消费的完成），不另写一套优先级。
 blocked 的「已读」与头像同源：打开看过再切走后，这一轮提醒退回 idle，也不再算活跃。
@@ -537,6 +542,14 @@ DSH 的会话在不同表面的 DOM **结构不同**，不能假设都是 `[data
 20px 的子节点」。缺稳定身份时宁可不上头像，也不按标题或顺序猜 —— 那会张冠李戴到
 同名会话上，比不显示更糟。
 
+**前导位是共享的**：0.2.2 起宿主在会话行的 `span.slot` 里二选一渲染 ——
+该行非 idle 时画自己的 `SessionStatusDots`（10px 点 / 14px 转圈，带 `data-state`），
+idle 时才 `renderSlot("sidebar.session.row.leading")`。`span.slot` 本身**无条件渲染**，
+所以插件直接 `insertBefore` 自己的 svg 在两种情况下都能挂上；非 idle 时格子里还躺着
+宿主的状态点，插件把它与 `visuallyHidden` 文本一起藏掉，并把格子改成按内容撑开
+（只剩头像时 24px，多出标记时并排留 2px 缝），标题顺延让位、行高仍是 32px。
+[scripts/bundle-check.mjs](scripts/bundle-check.mjs) 里有一条断言专门盯这个共处场景。
+
 要覆盖这两种表面，需要一个**公开的稳定身份入口**，二选一：
 
 1. 在搜索结果行上暴露 `data-row-key="session:<id>"`（最小改动，本插件已能自动识别，
@@ -551,6 +564,11 @@ head 注入，不是 client 模块）。本插件不修改安装包、不依赖 
 动画实例。
 
 ## 安装
+
+要求 **DeepSeek Harness ≥ 0.2.1-rc.5**（`package.json` 的 `engines.dsh`）。
+0.2.2 起宿主在会话行前导位里二选一渲染：非 idle 时画自己的状态点，idle 时才把
+`sidebar.session.row.leading` 槽位让出来 —— 本插件直接往那个 `span.slot` 里插头像，
+两种情况下都能挂上，并把宿主的状态点藏掉（状态由头像自己表达）。
 
 ```bash
 dsh plugin --profile <PROFILE> add github:devzer0o0/dsh-grok-buddy
@@ -615,9 +633,14 @@ GET 返回 200 但 `probe` 为 null **不算**链路通 —— 那表示没开�
 
 * 订阅 `session/event`：turn/step 边界、tool/call、tool/result、approval/asked、
   llm/retry、turn/end、标题与工作目录
-* 订阅 `agent/assistant-stream`：只看有没有开始吐字
+* 订阅 `agent/assistant-stream`：只看有没有开始吐字。宿主的 **chunk 帧不带
+  `turn`/`step`**（只有 start 帧带），所以 [lib/stream-turn.js](lib/stream-turn.js)
+  按 `attemptId` 记住 start 帧的 turn 再还原 —— 否则折叠器拿到 `undefined`，
+  两道身份门闸全跳过，迟到的旧分片就能给已结束的任务续命
 * 订阅 `agent/status` 与 `agent/error`：agent 是否在跑、有没有崩
-* 读 `sessionProjections` 的 userQuestions：挂起的提问与计划评审
+* 读 `sessionProjections` 的 userQuestions：挂起的提问与计划评审。优先用
+  `snapshot(session, ['userQuestions'])`（返回 `{ asOfSeq, values }`，values 是 wire view），
+  `stateOf(session, key)` 在 0.2.2 已标 deprecated，只作旧宿主回退
 * [lib/fold.js](lib/fold.js) 把这些折成**事实**（不产出状态名）
 * [src/decision.js](src/decision.js) 用事实 + 展示输入算出**六态**（唯一决策表）
 * 暴露 `GET /dsh-grok-buddy/state.json`，并在页面 head 注入 `/dsh-grok-buddy/widget.js`
@@ -704,9 +727,20 @@ node --test "test/*.test.mjs"     # 单元 / 决策 / 路由 / 构建产物集�
 测试分三层：
 
 * [test/decision.test.mjs](test/decision.test.mjs)、[test/derive.test.mjs](test/derive.test.mjs)：六态判定与事件身份
-* [test/probe-route.test.mjs](test/probe-route.test.mjs)、[test/colors-route.test.mjs](test/colors-route.test.mjs)：真实 HTTP 路由
+* [test/probe-route.test.mjs](test/probe-route.test.mjs)、[test/colors-route.test.mjs](test/colors-route.test.mjs)、
+  [test/routes.test.mjs](test/routes.test.mjs)：真实 HTTP 路由（state / probe / colors / settings /
+  auto-color / workspaces / widget.js / index-inject）
 * [test/widget-integration.test.mjs](test/widget-integration.test.mjs)：**把构建产物真的跑起来**
   （boot / fetch / sync / mount / 动画 / observer / dispose），不是复制一份实现重测
+
+真浏览器那一层是 [scripts/bundle-check.mjs](scripts/bundle-check.mjs)：起本地服务器、
+用真 Chrome + CDP 打开照宿主结构复刻的侧栏 DOM，把 `lib/widget.js` 注入进去跑
+（含「非 idle 行头像与宿主状态点共处一格」的断言）。跑法：
+
+```bash
+node scripts/bundle-check.mjs            # 32 项断言，需要本机有 Chrome
+node scripts/bundle-check.mjs --shots    # 顺带把截图落到临时目录
+```
 
 `preview.html` 与 `docs/*.html` 跑的都是构建产物本身，不依赖 DSH。
 

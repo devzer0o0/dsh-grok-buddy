@@ -6,13 +6,15 @@
  * 并给调色板与菜单项一点自己的外观。单独成模块是为了能被单测直接断言。
  *
  * 布局踩过的坑（值得钉死）：
- * DSH 的会话前导位（.slot）是**定宽 16px** 的格子，原生状态点/转圈画在里面。
- * DSH 还会往同一格里塞自己的标记 —— 定时任务的时钟（[data-session-schedule-mark]，
- * 也是 16px）。原生实现只在该行 idle 时才画时钟，所以两者从不同框；我们顶掉状态点后，
- * 头像和时钟会同时出现，两个 16px 挤进一个 16px 盒子 → 溢出 → 时钟压到标题上。
+ * DSH 的会话前导位（.slot）是**定宽 16px** 的格子。0.2.2 起宿主在这里二选一渲染：
+ * 该行非 idle 时画自己的 SessionStatusDots（10px 点 / 14px 转圈，带 data-state），
+ * idle 时才 renderSlot('sidebar.session.row.leading')。span.slot 本身**无条件渲染**，
+ * 所以插件直接 insertBefore 自己的 svg 就能在两种情况下都挂上 —— 但非 idle 时
+ * 格子里还躺着宿主的状态点，两个标记挤进一个 16px 盒子 → 溢出 → 压到标题上。
  *
  * 所以格子改成**按内容撑开**：只剩头像时与 BOT_SIZE 同宽，
- * 多出标记时并排摆放、留 2px 缝，标题顺延让位。
+ * 多出标记时并排摆放、留 2px 缝，标题顺延让位；宿主状态点与 visuallyHidden
+ * 文本直接藏掉（状态由头像自己表达）。
  *
  * @module dsh-grok-buddy/styles
  */

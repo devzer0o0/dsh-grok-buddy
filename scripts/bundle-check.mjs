@@ -45,9 +45,11 @@ function hexToRgbParts(hex) {
 
 /** 六态各一行，外加一条未知会话（不在快照里，只有 DOM done）。 */
 const SESSIONS = [
-  { id: 'p-idle', phase: 'idle', reason: 'no-open-turn', detail: '', completionKey: '' },
-  { id: 'p-working', phase: 'working', reason: 'tool:bash', detail: 'bash', completionKey: '' },
-  { id: 'p-waiting', phase: 'waiting', reason: 'pending:question', detail: 'ask_user_question', completionKey: '' },
+  // dshState 是宿主自己画在前导位里的状态点取值（0.2.2 的 SessionStatusDots）：
+  // 非 idle 时它占着同一个 16px 格子，插件必须与它共处而不是假设格子是空的。
+  { id: 'p-idle', phase: 'idle', reason: 'no-open-turn', detail: '', completionKey: '', dshState: 'idle' },
+  { id: 'p-working', phase: 'working', reason: 'tool:bash', detail: 'bash', completionKey: '', dshState: 'ongoing' },
+  { id: 'p-waiting', phase: 'waiting', reason: 'pending:question', detail: 'ask_user_question', completionKey: '', dshState: 'warning' },
   // blocked 的 fixture 必须表达「任务已因错误停止」：只写 reason=error:RATE_LIMIT 只能
   // 证明「见过一个错误码」，证明不了任务停止 —— 新规则下会被页面降级成 idle。
   {
@@ -63,9 +65,10 @@ const SESSIONS = [
     stopCode: 'RATE_LIMIT',
     turnKey: 'p-blocked#7',
     stopTurnKey: 'p-blocked#7',
+    dshState: 'warning',
   },
-  { id: 'p-thinking', phase: 'thinking', reason: 'model:generating', detail: '', completionKey: '' },
-  { id: 'p-done', phase: 'done', reason: 'terminal-completed', detail: '', completionKey: 'p-done#1', completedAt: Date.now() },
+  { id: 'p-thinking', phase: 'thinking', reason: 'model:generating', detail: '', completionKey: '', dshState: 'ongoing' },
+  { id: 'p-done', phase: 'done', reason: 'terminal-completed', detail: '', completionKey: 'p-done#1', completedAt: Date.now(), dshState: 'done' },
 ]
 
 /**
@@ -134,15 +137,14 @@ const HARNESS = `<!doctype html><html lang="zh-CN" data-ds-theme="light"><head><
     el.setAttribute('aria-selected', row.selected ? 'true' : 'false')
     const slot = document.createElement('span')
     slot.className = 'Kx9_slot'
-    const dot = document.createElement('span')
-    dot.setAttribute('data-state', row.dshState)
-    slot.appendChild(dot)
-    if (row.id === 'p-working') {
-      const clock = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      clock.setAttribute('data-session-schedule-mark', 'true')
-      clock.setAttribute('width', '16'); clock.setAttribute('height', '16')
-      clock.innerHTML = '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor"/>'
-      slot.appendChild(clock)
+    // 0.2.2 宿主：非 idle 时前导位里是 SessionStatusDots（带 data-state 的点/转圈），
+    // idle 时才是 renderSlot('sidebar.session.row.leading') 的内容（通常为空）。
+    // 两种情况下 span.slot 本身都无条件渲染 —— 插件直接 insertBefore 自己的 svg，
+    // 所以头像在非 idle 行同样挂得上，只是要和宿主状态点共处一格。
+    if (row.dshState !== 'idle') {
+      const dot = document.createElement('span')
+      dot.setAttribute('data-state', row.dshState)
+      slot.appendChild(dot)
     }
     el.appendChild(slot)
     const title = document.createElement('span')
@@ -221,10 +223,8 @@ function startServer() {
     const server = http.createServer((req, res) => {
       const url = decodeURIComponent((req.url || '/').split('?')[0])
       if (url === '/harness.html') {
-        const rows = SESSIONS.map((s) => ({
-          id: s.id,
-          dshState: s.phase === 'done' ? 'done' : s.phase === 'idle' ? 'idle' : 'ongoing',
-        })).concat([{ id: 'p-ghost', dshState: 'done' }])
+        const rows = SESSIONS.map((s) => ({ id: s.id, dshState: s.dshState }))
+          .concat([{ id: 'p-ghost', dshState: 'done' }])
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(
           HARNESS.replace('__FOLDERS__', JSON.stringify(FOLDER_SVGS))
@@ -468,20 +468,24 @@ async function main() {
       layout,
     )
 
-    const scheduleLayout = await evaluate(`(() => {
+    // 0.2.2 宿主在非 idle 行把 SessionStatusDots 放进同一个 16px 前导位。
+    // 插件必须：头像照挂、宿主状态点被藏掉、格子按内容撑开、标题不被压、行高不变。
+    const statusDotLayout = await evaluate(`(() => {
       const row = document.querySelector('[data-row-key="session:p-working"]')
       const group = row.closest('.JoiKIa_groupSection'), results = []
       for (const width of [280,180]) {
         group.style.width = width + 'px'
-        const a=row.querySelector('svg.dsgb').getBoundingClientRect(), c=row.querySelector('[data-session-schedule-mark]').getBoundingClientRect()
+        const a=row.querySelector('svg.dsgb').getBoundingClientRect()
+        const dot=row.querySelector('[data-state]')
+        const dotStyle=dot===null?null:getComputedStyle(dot)
         const title=row.querySelector('.Kx9_title').getBoundingClientRect(), r=row.getBoundingClientRect()
-        results.push({width,rowHeight:r.height,avatar:a.width,clock:c.width,vertical:a.top>=r.top && a.bottom<=r.bottom,clockGap:c.left-a.right,titleGap:title.left-c.right,titleWidth:title.width})
+        results.push({width,rowHeight:r.height,avatar:a.width,dotHidden:dotStyle!==null&&dotStyle.display==='none',vertical:a.top>=r.top && a.bottom<=r.bottom,titleGap:title.left-a.right,titleWidth:title.width})
       }
       group.style.width = ''
       return results
     })()`)
-    record('24px 头像 + 16px 时钟：宽/窄侧栏并排、不压标题、行高仍是 32px',
-      scheduleLayout.every(r=>r.rowHeight===32&&r.avatar===24&&r.clock===16&&r.vertical&&r.clockGap>=2&&r.titleGap>=0&&r.titleWidth>0),scheduleLayout)
+    record('非 idle 行：头像与宿主状态点共处一格，状态点被藏、不压标题、行高仍是 32px',
+      statusDotLayout.every(r=>r.rowHeight===32&&r.avatar===24&&r.dotHidden===true&&r.vertical&&r.titleGap>=0&&r.titleWidth>0),statusDotLayout)
 
     // Exercise folded events -> real HTTP state route -> built widget -> browser SVG.
     // Both events precede the poll, so this catches the missing-short-call regression.
