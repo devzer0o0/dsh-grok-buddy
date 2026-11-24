@@ -257,6 +257,9 @@ function boot() {
    */
   function detectDark() {
     const root = document.documentElement
+    // 宿主把解析后的配色投影成 body[data-ds-dark-theme]，这是最权威的一路。
+    const body = document.body
+    if (body !== null && typeof body.hasAttribute === 'function' && body.hasAttribute('data-ds-dark-theme')) return true
     if (root.dataset.dsTheme === 'dark') return true
     if (root.dataset.dsTheme === 'light') return false
     if (root.dataset.theme === 'dark') return true
@@ -1225,13 +1228,15 @@ function boot() {
     box.appendChild(reset)
     box.appendChild(resetHint)
 
+    // 与宿主 --dsw-alias-bg-layer-2 / --dsw-alias-label-primary 的深浅两套取值对齐，
+    // 这样调色板和右键菜单在同一个主题下是同一个底色。
     if (dark) {
-      box.style.background = '#22262c'
-      box.style.color = '#e6e8ea'
+      box.style.background = '#2c2c2e'
+      box.style.color = '#f9fafb'
       box.style.colorScheme = 'dark'
     } else {
       box.style.background = '#ffffff'
-      box.style.color = '#1f2328'
+      box.style.color = '#0f1115'
       box.style.colorScheme = 'light'
     }
 
@@ -1675,7 +1680,11 @@ function boot() {
 
   const themeObserver = new MutationObserver(onThemeChange)
   for (const el of [document.documentElement, document.body]) {
-    themeObserver.observe(el, { attributes: true, attributeFilter: ['data-ds-theme', 'data-theme', 'class', 'style'] })
+    // data-ds-dark-theme 是宿主真正投影深色的地方（body 上），必须一起盯。
+    themeObserver.observe(el, {
+      attributes: true,
+      attributeFilter: ['data-ds-theme', 'data-theme', 'data-ds-dark-theme', 'class', 'style'],
+    })
   }
   onDispose(() => themeObserver.disconnect())
 

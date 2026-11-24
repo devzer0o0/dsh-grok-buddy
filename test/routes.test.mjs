@@ -111,8 +111,11 @@ function withTempHome() {
   }
 }
 
-function boot() {
+function boot(services) {
   const { ctx, routes, listeners } = makeCtx()
+  if (services !== undefined && services !== null) {
+    ctx.get = (name) => services[name]
+  }
   apply(ctx)
   return { routes, listeners }
 }
@@ -269,7 +272,7 @@ test('colors.json：非法颜色被拒，不写进表', async () => {
   }
 })
 
-test('settings.json：GET 默认值，POST 只认三个字段', async () => {
+test('settings.json：GET 默认值，POST 只认白名单字段', async () => {
   const home = withTempHome()
   try {
     const { routes } = boot()
@@ -279,11 +282,17 @@ test('settings.json：GET 默认值，POST 只认三个字段', async () => {
     const initialBody = JSON.parse(initial.body)
     assert.equal(initialBody.ok, true)
     assert.equal(initialBody.autoColorNewFolders, false)
+    // 自动置顶默认开启：老设置文件缺字段时也保持开启。
+    assert.equal(initialBody.autoPromoteActiveWorkspace, true)
     assert.equal(initialBody.baselineComplete, false)
+    // 显示模式默认「只显示进行中」，最近 N 默认 5。
+    assert.equal(initialBody.workspaceDisplayMode, 'active')
+    assert.equal(initialBody.workspaceRecentLimit, 5)
     assert.deepEqual(initialBody.knownWorkspaces, [])
 
     const patched = await call(handler, 'POST', {
       autoColorNewFolders: true,
+      autoPromoteActiveWorkspace: false,
       baselineComplete: true,
       knownWorkspaces: ['ws-1', 'ws-2'],
       // 不认识的字段必须被忽略，不能写进文件
@@ -292,6 +301,7 @@ test('settings.json：GET 默认值，POST 只认三个字段', async () => {
     assert.equal(patched.status, 200)
     const patchedBody = JSON.parse(patched.body)
     assert.equal(patchedBody.autoColorNewFolders, true)
+    assert.equal(patchedBody.autoPromoteActiveWorkspace, false)
     assert.equal(patchedBody.baselineComplete, true)
     assert.deepEqual(patchedBody.knownWorkspaces, ['ws-1', 'ws-2'])
     assert.equal(patchedBody.somethingElse, undefined)
@@ -299,6 +309,162 @@ test('settings.json：GET 默认值，POST 只认三个字段', async () => {
     const badType = await call(handler, 'POST', { autoColorNewFolders: 'yes' })
     assert.equal(badType.status, 400)
     assert.match(JSON.parse(badType.body).error, /布尔/)
+
+    const badPromote = await call(handler, 'POST', { autoPromoteActiveWorkspace: 'yes' })
+    assert.equal(badPromote.status, 400)
+    assert.match(JSON.parse(badPromote.body).error, /布尔/)
+
+    // 显示模式：只认三个枚举值
+    const mode = await call(handler, 'POST', { workspaceDisplayMode: 'recent-sessions' })
+    assert.equal(mode.status, 200)
+    assert.equal(JSON.parse(mode.body).workspaceDisplayMode, 'recent-sessions')
+    const badMode = await call(handler, 'POST', { workspaceDisplayMode: 'everything' })
+    assert.equal(badMode.status, 400)
+    assert.match(JSON.parse(badMode.body).error, /workspaceDisplayMode/)
+
+    // 最近 N：1..50 的整数
+    const limit = await call(handler, 'POST', { workspaceRecentLimit: 12 })
+    assert.equal(limit.status, 200)
+    assert.equal(JSON.parse(limit.body).workspaceRecentLimit, 12)
+    for (const bad of [0, 51, 3.5, '7']) {
+      const rejected = await call(handler, 'POST', { workspaceRecentLimit: bad })
+      assert.equal(rejected.status, 400, '非法 N 必须被拒: ' + String(bad))
+      assert.match(JSON.parse(rejected.body).error, /workspaceRecentLimit/)
+    }
+
+    // 落盘后重新读：模式与 N 都还在（重启不丢）
+    const reread = await call(handler, 'GET')
+    const rereadBody = JSON.parse(reread.body)
+    assert.equal(rereadBody.workspaceDisplayMode, 'recent-sessions')
+    assert.equal(rereadBody.workspaceRecentLimit, 12)
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：没有会话服务时安静降级为 available:false', async () => {
+  const home = withTempHome()
+  try {
+    const { routes } = boot()
+    const handler = routes.get('/dsh-grok-buddy/recent.json')
+    const res = await call(handler, 'GET')
+    assert.equal(res.status, 200, '拿不到数据源也不能 5xx')
+    const body = JSON.parse(res.body)
+    assert.equal(body.ok, true)
+    assert.equal(body.available, false)
+    assert.deepEqual(body.sessions, [])
+    assert.equal(body.limit, 5)
+
+    const post = await call(handler, 'POST', {})
+    assert.equal(post.status, 405)
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：按 updatedAt 降序，剔除 subagent / 空白 / 无 cwd 的会话', async () => {
+  const home = withTempHome()
+  try {
+    const sessions = [
+      { sessionId: 'old', updatedAt: 100, cwd: '/p/a', running: false },
+      { sessionId: 'new', updatedAt: 900, cwd: '/p/b', running: true },
+      { sessionId: 'mid', updatedAt: 500, cwd: '/p/a', running: false },
+      { sessionId: 'sub', updatedAt: 950, cwd: '/p/a', origin: 'subagent' },
+      { sessionId: 'blank', updatedAt: 940, cwd: '/p/a', blank: true },
+      { sessionId: 'cold', updatedAt: 930, cwd: '' },
+    ]
+    const { routes } = boot({ sessionController: { list: () => sessions } })
+    const handler = routes.get('/dsh-grok-buddy/recent.json')
+    const res = await call(handler, 'GET')
+    const body = JSON.parse(res.body)
+    assert.equal(body.available, true)
+    assert.equal(body.source, 'sessionController')
+    assert.deepEqual(body.sessions.map((row) => row.id), ['new', 'mid', 'old'])
+    assert.equal(body.sessions[0].running, true)
+    assert.equal(body.sessions[1].running, false)
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：已归档的会话不占「最近 N」名额', async () => {
+  const home = withTempHome()
+  try {
+    // 宿主侧栏默认把归档会话整条隐藏，它们占掉名额就会让「最近 5 条」只显示 4 条。
+    const sessions = []
+    for (let i = 0; i < 8; i += 1) {
+      sessions.push({ sessionId: 's' + i, updatedAt: 1000 - i, cwd: '/p/x' })
+    }
+    const { routes } = boot({
+      sessionController: { list: () => sessions },
+      workspaceRegistry: {
+        list: () => [],
+        archivedSessionIds: ['s0', 's2'],
+      },
+    })
+    const recent = routes.get('/dsh-grok-buddy/recent.json')
+    const body = JSON.parse((await call(recent, 'GET')).body)
+    assert.equal(body.available, true)
+    assert.deepEqual(body.sessions.map((row) => row.id), ['s1', 's3', 's4', 's5', 's6'])
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：拿不到归档信息时不做归档过滤', async () => {
+  const home = withTempHome()
+  try {
+    const sessions = []
+    for (let i = 0; i < 6; i += 1) {
+      sessions.push({ sessionId: 's' + i, updatedAt: 1000 - i, cwd: '/p/x' })
+    }
+    const { routes } = boot({
+      sessionController: { list: () => sessions },
+      workspaceRegistry: { list: () => [] },
+    })
+    const recent = routes.get('/dsh-grok-buddy/recent.json')
+    const body = JSON.parse((await call(recent, 'GET')).body)
+    assert.deepEqual(body.sessions.map((row) => row.id), ['s0', 's1', 's2', 's3', 's4'])
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：N 由设置决定，改设置后立刻按新 N 截断', async () => {
+  const home = withTempHome()
+  try {
+    const sessions = []
+    for (let i = 0; i < 10; i += 1) {
+      sessions.push({ sessionId: 's' + i, updatedAt: 1000 - i, cwd: '/p/x' })
+    }
+    const { routes } = boot({ sessionController: { list: () => sessions } })
+    const recent = routes.get('/dsh-grok-buddy/recent.json')
+    const settings = routes.get('/dsh-grok-buddy/settings.json')
+
+    const first = JSON.parse((await call(recent, 'GET')).body)
+    assert.equal(first.sessions.length, 5, '默认 5 个')
+
+    await call(settings, 'POST', { workspaceRecentLimit: 2 })
+    const second = JSON.parse((await call(recent, 'GET')).body)
+    assert.equal(second.limit, 2)
+    assert.deepEqual(second.sessions.map((row) => row.id), ['s0', 's1'])
+  } finally {
+    home.restore()
+  }
+})
+
+test('recent.json：sessionQuery 的 header 形状也能用 createdAt 兜底排序', async () => {
+  const home = withTempHome()
+  try {
+    const list = [
+      { header: { id: 'a', createdAt: 10 } },
+      { header: { id: 'b', createdAt: 30 } },
+    ]
+    const { routes } = boot({ sessionQuery: { listSessions: () => list } })
+    const handler = routes.get('/dsh-grok-buddy/recent.json')
+    const body = JSON.parse((await call(handler, 'GET')).body)
+    assert.equal(body.source, 'sessionQuery')
+    assert.deepEqual(body.sessions.map((row) => row.id), ['b', 'a'])
   } finally {
     home.restore()
   }
@@ -355,6 +521,58 @@ test('workspaces.json：宿主没有 workspace 服务时 501', async () => {
     const res = await call(handler, 'GET')
     assert.equal(res.status, 501)
     assert.match(JSON.parse(res.body).error, /workspaceRegistry/)
+  } finally {
+    home.restore()
+  }
+})
+
+test('session/event 的 turn/start 会把新会话所属文件夹置顶', async () => {
+  const home = withTempHome()
+  try {
+    const { ctx, listeners } = makeCtx()
+    const order = [
+      { id: 'ws-a', sessionIds: ['s1'] },
+      { id: 'ws-b', sessionIds: ['s2'] },
+    ]
+    const calls = []
+    ctx.get = (serviceName) =>
+      serviceName === 'workspaceRegistry'
+        ? {
+            list: () => order.map((entry) => ({ id: entry.id, sessionIds: entry.sessionIds.slice() })),
+            insertBefore: async (id, beforeId) => {
+              calls.push([id, beforeId])
+              const from = order.findIndex((entry) => entry.id === id)
+              const [moved] = order.splice(from, 1)
+              const to = order.findIndex((entry) => entry.id === beforeId)
+              order.splice(to, 0, moved)
+              return order.map((entry) => entry.id)
+            },
+          }
+        : undefined
+    apply(ctx)
+
+    const emit = (sessionId) => {
+      for (const handler of listeners.get('session/event') || []) {
+        handler({ id: sessionId, header: { id: sessionId } }, { type: 'turn/start', seq: 1, data: { turn: 1 } })
+      }
+    }
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+    // s1 属于 ws-a，而 ws-a 已经在第一位 → 不该写盘。
+    emit('s1')
+    await settle()
+    assert.deepEqual(calls, [])
+
+    // s2 属于 ws-b → 把 ws-b 移到 ws-a 之前。
+    emit('s2')
+    await settle()
+    assert.deepEqual(calls, [['ws-b', 'ws-a']])
+    assert.deepEqual(order.map((entry) => entry.id), ['ws-b', 'ws-a'])
+
+    // 同一会话继续跑 → 不再移动。
+    emit('s2')
+    await settle()
+    assert.equal(calls.length, 1)
   } finally {
     home.restore()
   }

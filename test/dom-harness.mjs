@@ -49,6 +49,12 @@ export class El {
     this.classNameIsObject = false
   }
 
+  // 真实 DOM 里 parentNode 与 parentElement 都在；桩只维护 parentElement，
+  // 这里补一个只读别名，免得被测代码用 parentNode 时在桩里炸掉。
+  get parentNode() {
+    return this.parentElement
+  }
+
   get className() {
     const value = this.attributes.get('class') || ''
     return this.classNameIsObject ? { baseVal: value } : value
@@ -168,6 +174,25 @@ export class El {
     return true
   }
 
+  /**
+   * 浏览器同义 API：程序化点击。
+   *
+   * 真实 DOM 里 el.click() 会派发一个冒泡的 click 事件，一路冒到 document；
+   * 被测代码正是靠 document 上的捕获监听判断「用户亲手点了什么」，所以这里
+   * 必须沿祖先链逐层触发，不能只触发自己。
+   */
+  click() {
+    const event = { type: 'click', target: this }
+    let node = this
+    while (node !== null && node !== undefined) {
+      node.fire('click', event)
+      node = node.parentElement
+    }
+    const doc = this.ownerDocument
+    if (doc !== null && doc !== undefined && typeof doc.fire === 'function') doc.fire('click', event)
+    return true
+  }
+
   /** 只用于测试：触发一次事件（事件对象补齐 stopPropagation/preventDefault）。 */
   fire(type, event) {
     if (!this._listeners.has(type)) return
@@ -204,7 +229,7 @@ export class El {
     const walk = (node) => {
       for (const child of node.children) {
         for (const group of groups) {
-          if (matchCompound(child, group)) {
+          if (matches(child, group)) {
             out.push(child)
             break
           }

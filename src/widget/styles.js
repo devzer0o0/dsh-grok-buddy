@@ -52,7 +52,7 @@ export function paletteStyles() {
     '.dsgb-menu-label{flex:1;min-width:0}',
     '.dsgb-palette{' +
       'position:fixed;z-index:2147483000;width:236px;padding:10px;border-radius:10px;' +
-      'background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-primary,#1f2328);' +
+      'background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#0f1115);' +
       'box-shadow:0 8px 28px rgba(0,0,0,.22),0 0 0 1px rgba(127,127,127,.22);' +
       'font:13px/18px "PingFang SC",system-ui,sans-serif;box-sizing:border-box}',
     '.dsgb-palette-head{font-size:12px;opacity:.6;margin:0 0 8px 2px}',

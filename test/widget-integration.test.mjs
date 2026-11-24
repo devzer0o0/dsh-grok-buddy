@@ -46,6 +46,19 @@ async function boot(opts) {
   const fetchLog = []
   let stateBody = { ok: true, now, sessions: [] }
   let colorsBody = { ok: true, projects: {} }
+  // 设置与工作区名册各自独立：默认「自动配色关、自动置顶开、基线已完成」，
+  // 名册默认不可用（与真实宿主缺服务时一致），需要时由用例覆盖。
+  let settingsBody = {
+    ok: true,
+    autoColorNewFolders: false,
+    autoPromoteActiveWorkspace: true,
+    baselineComplete: true,
+    knownWorkspaces: [],
+  }
+  if (options.settings !== undefined) settingsBody = { ...settingsBody, ...options.settings }
+  let workspacesBody = { ok: true }
+  // 最近会话列表：默认「拿不到」（与真实宿主缺会话服务时一致），需要时由用例覆盖。
+  let recentBody = { ok: true, available: false, sessions: [] }
   let fetchFails = false
   let holdNext = null
   let holdNextColorsPost = null
@@ -153,7 +166,12 @@ async function boot(opts) {
     }),
     matchMedia: (query) => ({ matches: options.reduced === true && query.indexOf('reduced-motion') !== -1 }),
     fetch: (url, init) => {
-      fetchLog.push({ url, method: (init !== undefined && init.method) || 'GET', at: now })
+      fetchLog.push({
+        url,
+        method: (init !== undefined && init.method) || 'GET',
+        at: now,
+        body: init === undefined ? undefined : init.body,
+      })
       if (fetchFails) return Promise.reject(new Error('network down'))
       if (typeof url === 'string' && url.indexOf('/colors.json') !== -1) {
         const isPost = init !== undefined && init.method === 'POST'
@@ -167,6 +185,21 @@ async function boot(opts) {
       if (typeof url === 'string' && url.indexOf('/probe') !== -1) {
         return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ ok: false }) })
       }
+      if (typeof url === 'string' && url.indexOf('/settings.json') !== -1) {
+        const isPost = init !== undefined && init.method === 'POST'
+        if (isPost) {
+          // 服务端语义：只认白名单字段，回写后返回完整设置。
+          const patch = JSON.parse(init.body)
+          settingsBody = { ...settingsBody, ...patch }
+        }
+        return Promise.resolve(jsonResponse(settingsBody))
+      }
+      if (typeof url === 'string' && url.indexOf('/workspaces.json') !== -1) {
+        return Promise.resolve(jsonResponse(workspacesBody))
+      }
+      if (typeof url === 'string' && url.indexOf('/recent.json') !== -1) {
+        return Promise.resolve(jsonResponse(recentBody))
+      }
       if (holdNext !== null) {
         const gate = holdNext
         holdNext = null
@@ -177,9 +210,12 @@ async function boot(opts) {
   }
   sandbox.globalThis = sandbox
   window.__DSH_TEST__ = true
+  // 工作区标题栏模块默认不启动（桩 DOM 没有侧栏结构）；需要它的用例显式打开。
+  if (options.chrome === true) window.__DSH_CHROME_TEST__ = true
 
   const context = vm.createContext(sandbox)
   vm.runInContext(SOURCE, context, { filename: 'widget.js' })
+  if (options.chrome === true && window.__dsgbChromeTest !== undefined) window.__dsgbChromeTest.start()
 
   async function flush() {
     for (let i = 0; i < 60; i++) await flushMicrotasks()
@@ -200,6 +236,15 @@ async function boot(opts) {
     },
     setColors(body) {
       colorsBody = body
+    },
+    setSettings(body) {
+      settingsBody = body
+    },
+    setWorkspaces(body) {
+      workspacesBody = body
+    },
+    setRecent(body) {
+      recentBody = body
     },
     failFetch(value) {
       fetchFails = value
@@ -1048,6 +1093,49 @@ test('自定义 hex 与恢复默认都生效：恢复默认后文件夹回到 DS
   h.api.stop()
 })
 
+test('调色板里有「最近活动的项目自动置顶」开关：默认勾选，点一下写设置并取消勾选', async () => {
+  const h = await boot({ chrome: true })
+  makeFolderSection(h.doc, 'proj-a')
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  clickColorEntry(h)
+  // 开关由 tick 补进调色板（桩 DOM 的 MutationObserver 是空实现，只能手动推进）。
+  h.window.__dsgbChromeTest.tick()
+  await h.settle()
+
+  const box = h.doc.querySelector('.dsgb-promote')
+  assert.notEqual(box, null, '调色板里要有自动置顶开关')
+  const input = box.querySelector('input[type="checkbox"]')
+  assert.notEqual(input, null, '开关是 checkbox')
+  assert.equal(input.checked, true, '默认开启（设置里缺字段也按开启算）')
+  assert.equal(input.disabled, false, '设置读到之后可以改')
+  assert.match(box.textContent, /最近活动的项目自动置顶/, '有可读的开关名')
+  assert.match(box.textContent, /同一会话继续执行不会重复移动/, '说明触发边界：只有新会话才移动')
+
+  // 关掉：写设置 + 本地取消勾选
+  input.checked = false
+  input.fire('change')
+  await h.settle()
+  const posts = h.fetchLog.filter((entry) => entry.method === 'POST' && entry.url.indexOf('/settings.json') !== -1)
+  assert.equal(posts.length, 1, '只写一次设置')
+  assert.equal(input.checked, false, '关掉后保持未勾选')
+  h.api.stop()
+})
+
+test('自动置顶开关：设置里已关闭时打开调色板就是未勾选', async () => {
+  const h = await boot({ chrome: true, settings: { autoPromoteActiveWorkspace: false } })
+  makeFolderSection(h.doc, 'proj-a')
+  openHostMenu(h, 'proj-a')
+  await h.tick(600)
+  clickColorEntry(h)
+  h.window.__dsgbChromeTest.tick()
+  await h.settle()
+  const input = h.doc.querySelector('.dsgb-promote input[type="checkbox"]')
+  assert.notEqual(input, null)
+  assert.equal(input.checked, false, '设置里关着就不能显示成开启')
+  h.api.stop()
+})
+
 test('未设置颜色时：色块都不标已选、自定义框不预填哈希默认色、打开调色板不写配置', async () => {
   const h = await boot()
   makeFolderSection(h.doc, 'proj-a')
@@ -1525,3 +1613,680 @@ test('blocked 不推进完成代数、不触发 celebrate', async () => {
   assert.equal(figuresOf(slot).phase, 'done')
   h.api.stop()
 })
+
+
+// ── 工作区标题栏：右键菜单三模式 ────────────────────────────────────────────
+//
+// 夹具照宿主侧栏标题栏抄：
+//   div[class*="sectionHeader"]
+//     > span[class*="sectionLabel"]（文本「工作区」）
+//     > span[class*="searchSlot"]        ← 插件按钮插在它前面
+
+/** 造「工作区」标题栏。 */
+function makeHeader(doc) {
+  const header = doc.createElement('div')
+  header.className = 'JoiKIa_sectionHeader'
+  const label = doc.createElement('span')
+  label.className = 'JoiKIa_sectionLabel'
+  label.textContent = '工作区'
+  const search = doc.createElement('span')
+  search.className = 'JoiKIa_searchSlot'
+  header.appendChild(label)
+  header.appendChild(search)
+  doc.body.appendChild(header)
+  return { header, label, search }
+}
+
+/** 起一个带标题栏的环境，并把按钮补出来。 */
+async function bootChrome(opts) {
+  const h = await boot(opts)
+  makeHeader(h.doc)
+  h.window.__dsgbChromeTest.tick()
+  await h.settle()
+  return h
+}
+
+function headerButtonOf(h) {
+  return h.doc.querySelector('.dsgb-active-toggle')
+}
+
+function modeMenuOf(h) {
+  return h.doc.querySelector('.dsgb-mode-menu')
+}
+
+function settingsPosts(h) {
+  return h.fetchLog.filter((entry) => entry.method === 'POST' && entry.url.indexOf('/settings.json') !== -1)
+}
+
+test('标题栏按钮：默认「显示进行中的项目与会话」，右键出三模式菜单', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+  assert.notEqual(button, null, '标题栏里要有波形按钮')
+  assert.equal(button.getAttribute('aria-pressed'), 'false', '默认没有开启过滤')
+  assert.match(button.getAttribute('aria-label'), /显示进行中的项目与会话/, '默认模式写进无障碍标签')
+  assert.match(button.title, /右键选择模式/, '提示右键可以选模式')
+
+  button.fire('contextmenu')
+  const menu = modeMenuOf(h)
+  assert.notEqual(menu, null, '右键要出菜单')
+  assert.equal(menu.getAttribute('role'), 'menu')
+  assert.match(menu.textContent, /工作区显示方式/)
+
+  const options = menu.querySelectorAll('[data-dsgb-mode-option]')
+  assert.equal(options.length, 3, '三个模式')
+  assert.deepEqual(
+    options.map((item) => item.getAttribute('data-dsgb-mode-option')),
+    ['active', 'recent-with-projects', 'recent-sessions'],
+  )
+  assert.equal(options[0].getAttribute('aria-checked'), 'true', '默认选中第一个')
+  assert.equal(options[1].getAttribute('aria-checked'), 'false')
+  assert.equal(options[2].getAttribute('aria-checked'), 'false')
+  assert.match(menu.textContent, /显示最近活跃的项目与会话/, '第二个模式文案')
+  assert.match(menu.textContent, /显示最近活跃的会话/, '第三个模式文案')
+  assert.doesNotMatch(menu.textContent, /N/, '文案里不留占位符')
+  assert.equal(menu.querySelector('.dsgb-mode-limit input').value, '5', 'N 输入框默认 5')
+  h.api.stop()
+})
+
+test('选「显示最近活跃的项目与会话」：立刻生效、写设置、菜单关闭', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+  button.fire('contextmenu')
+  const menu = modeMenuOf(h)
+  menu.querySelector('[data-dsgb-mode-option="recent-with-projects"] input').fire('change')
+  await h.settle()
+
+  assert.equal(modeMenuOf(h), null, '选完就关菜单')
+  assert.equal(h.window.__dsgbChromeTest.mode(), 'recent-with-projects')
+  assert.match(button.getAttribute('aria-label'), /显示最近活跃的项目与会话/, '按钮文案跟着模式走')
+  const posts = settingsPosts(h)
+  assert.equal(posts.length, 1, '只写一次设置')
+  assert.deepEqual(JSON.parse(posts[0].body), { workspaceDisplayMode: 'recent-with-projects' })
+  h.api.stop()
+})
+
+test('改「最近 N 个」：夹到 1..50 并持久化', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+  button.fire('contextmenu')
+  const input = modeMenuOf(h).querySelector('.dsgb-mode-limit input')
+  input.value = '8'
+  input.fire('change')
+  await h.settle()
+  assert.equal(h.window.__dsgbChromeTest.limit(), 8)
+  assert.equal(input.value, '8', '输入框回填夹过的值')
+  let posts = settingsPosts(h)
+  assert.equal(posts.length, 1)
+  assert.deepEqual(JSON.parse(posts[0].body), { workspaceRecentLimit: 8 })
+
+  // 越界值夹回边界，且不重复写盘
+  h.window.__dsgbChromeTest.setLimit(0)
+  await h.settle()
+  assert.equal(h.window.__dsgbChromeTest.limit(), 1)
+  h.window.__dsgbChromeTest.setLimit(99)
+  await h.settle()
+  assert.equal(h.window.__dsgbChromeTest.limit(), 50)
+  posts = settingsPosts(h)
+  assert.equal(posts.length, 3, '两次越界各写一次（1 与 50）')
+  assert.deepEqual(JSON.parse(posts[1].body), { workspaceRecentLimit: 1 })
+  assert.deepEqual(JSON.parse(posts[2].body), { workspaceRecentLimit: 50 })
+  h.api.stop()
+})
+
+test('左键按所选模式生效：recent 模式只留最近 N 个会话与它们的项目', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const rowA1 = makeRow(h.doc, a.section, 's1', false)
+  const rowA2 = makeRow(h.doc, a.section, 's2', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  const rowB1 = makeRow(h.doc, b.section, 's3', false)
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1', 's2'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s3'], known: true },
+    ],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [{ id: 's1' }, { id: 's3' }] })
+  await h.tick(600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), 'recent-with-projects')
+  assert.equal(rowA1.row.getAttribute('data-dsgb-recent'), 'true', 's1 在最近列表里')
+  assert.equal(rowA2.row.getAttribute('data-dsgb-recent'), 'false', 's2 不在最近列表里')
+  assert.equal(rowB1.row.getAttribute('data-dsgb-recent'), 'true', 's3 在最近列表里')
+  assert.equal(a.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-a 有最近会话，保留')
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-b 有最近会话，保留')
+  h.api.stop()
+})
+
+test('recent 模式：没有最近会话的项目被标记为空，未分组归属未知时保持可见', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  makeRow(h.doc, a.section, 's1', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  makeRow(h.doc, b.section, 's3', false)
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s3'], known: true },
+    ],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [{ id: 's1' }] })
+  await h.tick(600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(a.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-a 有最近会话')
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), '1', 'proj-b 没有最近会话 → 隐藏')
+  h.api.stop()
+})
+
+test('recent-with-projects：每个文件夹只留自己最近 1 条，未分组按最近 N 条显示', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const a1 = makeRow(h.doc, a.section, 's1', false)
+  const a2 = makeRow(h.doc, a.section, 's2', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  const b1 = makeRow(h.doc, b.section, 's3', false)
+  const b2 = makeRow(h.doc, b.section, 's4', false)
+  const u = makeFolderSection(h.doc, '', { title: '未分组' })
+  const u1 = makeRow(h.doc, u.section, 'u1', false)
+  const u2 = makeRow(h.doc, u.section, 'u2', false)
+  h.setState(sessionsBody(['s1', 's2', 's3', 's4', 'u1', 'u2'].map((id) => phaseRow(id, 'idle'))))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1', 's2'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s3', 's4'], known: true },
+    ],
+    membersReady: true,
+  })
+  // 全局最近 4 条里，proj-a 只命中 s2、proj-b 只命中 s4；u1/u2 是未分组。
+  h.setRecent({
+    ok: true,
+    available: true,
+    sessions: [{ id: 's2' }, { id: 's4' }, { id: 'u1' }, { id: 'u2' }],
+    latest: { 'proj-a': 's2', 'proj-b': 's4' },
+    ungrouped: ['u1', 'u2'],
+  })
+  await h.tick(1600)
+  await h.tick(1600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(a2.row.getAttribute('data-dsgb-recent'), 'true', 'proj-a 留它自己最近的那条')
+  assert.equal(a1.row.getAttribute('data-dsgb-recent'), 'false', 'proj-a 更早的会话不显示')
+  assert.equal(b2.row.getAttribute('data-dsgb-recent'), 'true', 'proj-b 留它自己最近的那条')
+  assert.equal(b1.row.getAttribute('data-dsgb-recent'), 'false', 'proj-b 更早的会话不显示')
+  assert.equal(u1.row.getAttribute('data-dsgb-recent'), 'true', '未分组会话照常显示')
+  assert.equal(u2.row.getAttribute('data-dsgb-recent'), 'true', '未分组会话照常显示')
+  assert.equal(a.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-a 保留')
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-b 保留')
+  assert.equal(u.section.getAttribute('data-dsgb-recent-empty'), null, '未分组分区保留')
+  h.api.stop()
+})
+
+test('recent-with-projects：只留最近 N 个项目，超出 N 的项目整组隐藏', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const a1 = makeRow(h.doc, a.section, 's1', false)
+  const a2 = makeRow(h.doc, a.section, 's2', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  const b1 = makeRow(h.doc, b.section, 's3', false)
+  const c = makeFolderSection(h.doc, 'proj-c')
+  const c1 = makeRow(h.doc, c.section, 's4', false)
+  h.setState(sessionsBody(['s1', 's2', 's3', 's4'].map((id) => phaseRow(id, 'idle'))))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b', 'proj-c'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1', 's2'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s3'], known: true },
+      { workspaceId: 'proj-c', sessionIds: ['s4'], known: true },
+    ],
+    membersReady: true,
+  })
+  // latest 的 key 顺序 = 项目最近活跃时间降序：proj-a → proj-b → proj-c。
+  // N = 2，所以只有前两个项目该留下，proj-c 整组隐藏。
+  h.setRecent({
+    ok: true,
+    available: true,
+    sessions: [{ id: 's2' }, { id: 's3' }, { id: 's4' }],
+    latest: { 'proj-a': 's2', 'proj-b': 's3', 'proj-c': 's4' },
+    ungrouped: [],
+  })
+  await h.tick(1600)
+  await h.tick(1600)
+  h.window.__dsgbChromeTest.setLimit(2)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(a2.row.getAttribute('data-dsgb-recent'), 'true', '前 N 个项目的最近会话保留')
+  assert.equal(a1.row.getAttribute('data-dsgb-recent'), 'false', '同项目更早的会话不显示')
+  assert.equal(b1.row.getAttribute('data-dsgb-recent'), 'true', '第二个项目保留')
+  assert.equal(c1.row.getAttribute('data-dsgb-recent'), 'false', '第 N+1 个项目的会话不显示')
+  assert.equal(a.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-a 保留')
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), null, 'proj-b 保留')
+  assert.equal(c.section.getAttribute('data-dsgb-recent-empty'), '1', 'proj-c 超出 N → 整组隐藏')
+  h.api.stop()
+})
+
+test('recent-with-projects：改「最近 N 个」后立即按新 N 重算项目数', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const a1 = makeRow(h.doc, a.section, 's1', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  const b1 = makeRow(h.doc, b.section, 's3', false)
+  h.setState(sessionsBody(['s1', 's3'].map((id) => phaseRow(id, 'idle'))))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s3'], known: true },
+    ],
+    membersReady: true,
+  })
+  h.setRecent({
+    ok: true,
+    available: true,
+    sessions: [{ id: 's1' }, { id: 's3' }],
+    latest: { 'proj-a': 's1', 'proj-b': 's3' },
+    ungrouped: [],
+  })
+  await h.tick(1600)
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), null, 'N=5 时两个项目都在')
+
+  h.window.__dsgbChromeTest.setLimit(1)
+  await h.settle()
+  assert.equal(a1.row.getAttribute('data-dsgb-recent'), 'true', 'N=1 → 最近的这个项目保留')
+  assert.equal(b1.row.getAttribute('data-dsgb-recent'), 'false', 'N=1 → 第二个项目不显示')
+  assert.equal(b.section.getAttribute('data-dsgb-recent-empty'), '1', 'N=1 → 第二个项目整组隐藏')
+  h.api.stop()
+})
+
+test('recent-with-projects：未分组会话同样只留最近 N 条', async () => {
+  const h = await bootChrome({ chrome: true })
+  const u = makeFolderSection(h.doc, '', { title: '未分组' })
+  const u1 = makeRow(h.doc, u.section, 'u1', false)
+  const u2 = makeRow(h.doc, u.section, 'u2', false)
+  const u3 = makeRow(h.doc, u.section, 'u3', false)
+  h.setState(sessionsBody(['u1', 'u2', 'u3'].map((id) => phaseRow(id, 'idle'))))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: [],
+    members: [],
+    membersReady: true,
+  })
+  h.setRecent({
+    ok: true,
+    available: true,
+    sessions: [{ id: 'u1' }, { id: 'u2' }, { id: 'u3' }],
+    latest: {},
+    ungrouped: ['u1', 'u2', 'u3'],
+  })
+  await h.tick(1600)
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  h.window.__dsgbChromeTest.setLimit(2)
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(u1.row.getAttribute('data-dsgb-recent'), 'true', '前 N 条未分组会话保留')
+  assert.equal(u2.row.getAttribute('data-dsgb-recent'), 'true')
+  assert.equal(u3.row.getAttribute('data-dsgb-recent'), 'false', '第 N+1 条未分组会话不显示')
+  h.api.stop()
+})
+
+test('recent 模式：未分组会话被宿主折叠时自动点开「展开其余 N 个会话」', async () => {
+  const h = await bootChrome({ chrome: true })
+  const u = makeFolderSection(h.doc, '', { title: '未分组' })
+  const u1 = makeRow(h.doc, u.section, 'u1', false)
+  // 宿主按 watermark 把超出部分折进这个按钮；点一次切换展开状态。
+  const overflow = h.doc.createElement('button')
+  overflow.setAttribute('data-row-key', 'overflow:')
+  overflow.setAttribute('aria-expanded', 'false')
+  overflow.addEventListener('click', () => {
+    overflow.setAttribute('aria-expanded', overflow.getAttribute('aria-expanded') === 'true' ? 'false' : 'true')
+  })
+  u.section.appendChild(overflow)
+  h.setState(sessionsBody([phaseRow('u1', 'idle')]))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: [],
+    members: [],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [{ id: 'u1' }], latest: {}, ungrouped: ['u1'] })
+  await h.tick(1600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(overflow.getAttribute('aria-expanded'), 'true', '未分组有命中会话 → 自动点开折叠按钮')
+  assert.equal(u1.row.getAttribute('data-dsgb-recent'), 'true', '未分组会话可见')
+
+  // 关掉过滤：替用户点开的按钮要折回。
+  headerButtonOf(h).fire('click')
+  await h.settle()
+  assert.equal(overflow.getAttribute('aria-expanded'), 'false', '关闭筛选后折回')
+  h.api.stop()
+})
+
+test('recent 模式：数据源拿不到时退回「只显示进行中」，不把侧栏清空', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, a.section, 's1', false)
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a'],
+    members: [{ workspaceId: 'proj-a', sessionIds: ['s1'], known: true }],
+    membersReady: true,
+  })
+  // 服务端明确说拿不到最近列表
+  h.setRecent({ ok: true, available: false, sessions: [] })
+  await h.tick(600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(h.window.__dsgbChromeTest.mode(), 'recent-with-projects', '选择本身保留')
+  assert.equal(h.window.__dsgbChromeTest.effectiveMode(), 'active', '实际生效退回 active')
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), 'active', 'CSS 分派也按 active')
+  assert.equal(made.row.getAttribute('data-dsgb-active'), 'false', '按活跃语义标记，而不是按最近')
+  assert.equal(made.row.getAttribute('data-dsgb-recent'), null, '不写 recent 标记')
+  h.api.stop()
+})
+
+test('recent-sessions 模式：项目行整行隐藏（CSS 规则），会话仍按最近标记', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, a.section, 's1', false)
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a'],
+    members: [{ workspaceId: 'proj-a', sessionIds: ['s1'], known: true }],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [{ id: 's1' }] })
+  await h.tick(600)
+
+  h.window.__dsgbChromeTest.setMode('recent-sessions')
+  await h.settle()
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), 'recent-sessions')
+  assert.equal(made.row.getAttribute('data-dsgb-recent'), 'true')
+  const style = h.doc.querySelector('[data-dsgb-workspace-chrome="style"]')
+  // 只藏真正的项目文件夹行：未分组分组的 key 就是 "workspace:"（空 id），
+  // 它的子会话也要在 recent-sessions 里显示，不能连父容器一起藏掉。
+  const workspaceRule = style.textContent.split('\n').find((line) =>
+    line.indexOf('html[data-dsgb-mode="recent-sessions"] [data-row-key^="workspace:"]') === 0,
+  )
+  assert.ok(workspaceRule, 'recent-sessions 下有项目行隐藏规则')
+  assert.ok(
+    workspaceRule.indexOf(':not([data-row-key="workspace:"])') !== -1,
+    '项目行在 recent-sessions 下整行隐藏，但未分组分组本身保留',
+  )
+  h.api.stop()
+})
+
+test('active 模式：不显示「展开其余 N 个会话」行与「未分组」标题行', async () => {
+  const h = await bootChrome({ chrome: true })
+  const u = makeFolderSection(h.doc, '', { title: '未分组' })
+  const u1 = makeRow(h.doc, u.section, 'u1', false)
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const a1 = makeRow(h.doc, a.section, 's1', false)
+  const b = makeFolderSection(h.doc, 'proj-b')
+  const b1 = makeRow(h.doc, b.section, 's2', false)
+  // 宿主按 watermark 折叠会话时渲染的按钮：点一次切换 aria-expanded。
+  const overflows = new Map()
+  for (const key of ['', 'proj-a', 'proj-b']) {
+    const button = h.doc.createElement('button')
+    button.setAttribute('data-row-key', 'overflow:' + key)
+    button.setAttribute('aria-expanded', 'false')
+    button.addEventListener('click', () => {
+      button.setAttribute('aria-expanded', button.getAttribute('aria-expanded') === 'true' ? 'false' : 'true')
+    })
+    const section = key === '' ? u.section : key === 'proj-a' ? a.section : b.section
+    section.appendChild(button)
+    overflows.set(key, button)
+  }
+  h.setState(sessionsBody([phaseRow('u1', 'working'), phaseRow('s1', 'idle'), phaseRow('s2', 'idle')]))
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a', 'proj-b'],
+    members: [
+      { workspaceId: 'proj-a', sessionIds: ['s1'], known: true },
+      { workspaceId: 'proj-b', sessionIds: ['s2'], known: true },
+    ],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [], latest: {}, ungrouped: [] })
+  await h.tick(1600)
+  headerButtonOf(h).fire('click')
+  await h.settle()
+
+  const style = h.doc.querySelector('[data-dsgb-workspace-chrome="style"]')
+  const lines = style.textContent.split('\n')
+  const overflowRule = lines.find((line) => line.indexOf('html[data-dsgb-mode="active"] [data-row-key^="overflow:"]') === 0)
+  assert.ok(overflowRule, 'active 模式下要有「展开其余 N 个会话」的隐藏规则')
+  const ungroupedRule = lines.find((line) => line.indexOf('html[data-dsgb-mode="active"] [data-row-key="workspace:"]') === 0)
+  assert.ok(ungroupedRule, 'active 模式下要有「未分组」标题行的隐藏规则')
+  // 只藏标题行：规则不能落到 groupSection 上，否则未分组的会话会一起消失。
+  assert.equal(ungroupedRule.indexOf('groupSection'), -1, '未分组只藏标题行，不藏整组')
+
+  // 藏行 ≠ 不展开：未分组里有进行中会话，仍要先点开宿主折叠，否则会话不渲染。
+  assert.equal(overflows.get('').getAttribute('aria-expanded'), 'true', '未分组有进行中会话 → 仍自动展开')
+  assert.equal(overflows.get('proj-a').getAttribute('aria-expanded'), 'false', '只有空闲会话的项目不展开')
+  assert.equal(overflows.get('proj-b').getAttribute('aria-expanded'), 'false')
+
+  // 未分组整组仍在（标题行由 CSS 藏，容器保留）；无进行中会话的项目整组隐藏。
+  assert.equal(u.section.getAttribute('data-dsgb-active-empty'), null, '未分组容器保留')
+  assert.equal(a.section.getAttribute('data-dsgb-active-empty'), '1', '只有空闲会话的项目整组隐藏')
+  assert.equal(u1.row.getAttribute('data-dsgb-active'), 'true')
+  assert.equal(a1.row.getAttribute('data-dsgb-active'), 'false')
+  assert.equal(b1.row.getAttribute('data-dsgb-active'), 'false')
+  h.api.stop()
+})
+
+test('夜间模式：菜单底色用宿主真实存在的 token，并给深色主题单独兜底', async () => {
+  const h = await bootChrome({ chrome: true })
+  const style = h.doc.querySelector('[data-dsgb-workspace-chrome="style"]')
+  const css = style.textContent
+  assert.doesNotMatch(css, /--dsw-alias-bg-elevated/, '宿主没有这个 token，兜底值会让深色下变白底')
+  assert.match(css, /\.dsgb-mode-menu\{[^}]*background:var\(--dsw-alias-bg-layer-2,#fff\)/, '浅色用 bg-layer-2')
+  // 兜底值必须等于宿主深色 token 的真实取值：bg-layer-2 = bluish-850 = #2c2c2e，
+  // label-primary = bluish-50 = #f9fafb。写错色号在 token 缺失时会露出浅色底。
+  assert.match(
+    css,
+    /body\[data-ds-dark-theme\] \.dsgb-mode-menu\{[^}]*background:var\(--dsw-alias-bg-layer-2,#2c2c2e\)/,
+    '深色主题下即使 token 缺失也要是深底',
+  )
+  assert.match(
+    css,
+    /body\[data-ds-dark-theme\] \.dsgb-mode-menu\{[^}]*color:var\(--dsw-alias-label-primary,#f9fafb\)/,
+    '深色文字兜底与宿主 label-primary 一致',
+  )
+  assert.match(css, /body\[data-ds-dark-theme\] \.dsgb-mode-menu\{[^}]*color-scheme:dark/, '原生控件跟着切深色')
+  h.api.stop()
+})
+
+const SETTINGS_POLL_MS_FOR_TEST = 5200
+
+test('设置轮询：外部改了 settings.json（另一个窗口/手改），页面自己跟上而不必重载', async () => {
+  const h = await bootChrome({
+    chrome: true,
+    settings: { workspaceDisplayMode: 'active', workspaceRecentLimit: 5 },
+  })
+  const button = headerButtonOf(h)
+  assert.match(button.getAttribute('aria-label'), /显示进行中的项目与会话/, '启动时按旧设置')
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), null, '过滤没开时不写模式属性')
+
+  // 另一个窗口（或直接改文件）把模式改成 recent-sessions。
+  h.setSettings({ workspaceDisplayMode: 'recent-sessions', workspaceRecentLimit: 3 })
+  // 推进过轮询间隔，再跑一次 tick；fetch 是异步的，settle 收尾。
+  await h.tick(SETTINGS_POLL_MS_FOR_TEST)
+  h.window.__dsgbChromeTest.tick()
+  await h.settle()
+  assert.equal(h.window.__dsgbChromeTest.mode(), 'recent-sessions', '轮询读回新模式')
+  assert.equal(h.window.__dsgbChromeTest.limit(), 3, 'N 也跟着变')
+  assert.match(button.getAttribute('aria-label'), /显示最近活跃的会话/, '按钮文案要跟着变')
+  h.api.stop()
+})
+
+test('持久化：设置里已有模式与 N 时，启动即按它显示', async () => {
+  const h = await bootChrome({
+    chrome: true,
+    settings: { workspaceDisplayMode: 'recent-sessions', workspaceRecentLimit: 3 },
+  })
+  assert.equal(h.window.__dsgbChromeTest.mode(), 'recent-sessions')
+  assert.equal(h.window.__dsgbChromeTest.limit(), 3)
+  const button = headerButtonOf(h)
+  assert.match(button.getAttribute('aria-label'), /显示最近活跃的会话/)
+
+  button.fire('contextmenu')
+  const menu = modeMenuOf(h)
+  const options = menu.querySelectorAll('[data-dsgb-mode-option]')
+  assert.equal(options[2].getAttribute('aria-checked'), 'true', '菜单里选中第三项')
+  assert.equal(options[0].getAttribute('aria-checked'), 'false')
+  assert.equal(menu.querySelector('.dsgb-mode-limit input').value, '3')
+  h.api.stop()
+})
+
+test('设置里是非法值时退回默认：模式退回 active，N 非数字退回 5、越界夹到边界', async () => {
+  const bad = await bootChrome({
+    chrome: true,
+    settings: { workspaceDisplayMode: 'everything', workspaceRecentLimit: 'many' },
+  })
+  assert.equal(bad.window.__dsgbChromeTest.mode(), 'active')
+  assert.equal(bad.window.__dsgbChromeTest.limit(), 5)
+  bad.api.stop()
+
+  const zero = await bootChrome({
+    chrome: true,
+    settings: { workspaceDisplayMode: 'recent-sessions', workspaceRecentLimit: 0 },
+  })
+  assert.equal(zero.window.__dsgbChromeTest.mode(), 'recent-sessions', '合法模式要保留')
+  assert.equal(zero.window.__dsgbChromeTest.limit(), 1, '0 是数字，夹到下限 1')
+  zero.api.stop()
+})
+
+test('保存失败：模式回滚到上一个，并给出可观察提示', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+  h.failFetch(true)
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  assert.equal(h.window.__dsgbChromeTest.mode(), 'active', '写盘失败要回滚')
+  assert.match(button.getAttribute('aria-label'), /显示进行中的项目与会话/)
+  assert.notEqual(h.doc.querySelector('.dsgb-auto-error'), null, '要有可观察的错误提示')
+  h.api.stop()
+})
+
+test('菜单：点外面 / Esc 关闭，点菜单内部不关', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+
+  button.fire('contextmenu')
+  assert.notEqual(modeMenuOf(h), null)
+  h.doc.fire('click', { target: modeMenuOf(h).querySelector('.dsgb-mode-title') })
+  assert.notEqual(modeMenuOf(h), null, '点菜单内部不关')
+
+  h.doc.fire('click', { target: h.doc.body })
+  assert.equal(modeMenuOf(h), null, '点外面关掉')
+
+  button.fire('contextmenu')
+  assert.notEqual(modeMenuOf(h), null)
+  h.doc.fire('keydown', { key: 'Escape', target: h.doc.body, preventDefault() {}, stopPropagation() {} })
+  assert.equal(modeMenuOf(h), null, 'Esc 关掉')
+  h.api.stop()
+})
+
+test('再点一次按钮关闭过滤：摘掉模式属性与所有标记，菜单也收起', async () => {
+  const h = await bootChrome({ chrome: true })
+  const a = makeFolderSection(h.doc, 'proj-a')
+  const made = makeRow(h.doc, a.section, 's1', false)
+  h.setWorkspaces({
+    ok: true,
+    available: true,
+    workspaces: ['proj-a'],
+    members: [{ workspaceId: 'proj-a', sessionIds: ['s1'], known: true }],
+    membersReady: true,
+  })
+  h.setRecent({ ok: true, available: true, sessions: [{ id: 's1' }] })
+  await h.tick(600)
+
+  h.window.__dsgbChromeTest.setMode('recent-with-projects')
+  await h.settle()
+  const button = headerButtonOf(h)
+  button.fire('click')
+  await h.settle()
+  assert.equal(button.getAttribute('aria-pressed'), 'true')
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), 'recent-with-projects')
+
+  button.fire('contextmenu')
+  assert.notEqual(modeMenuOf(h), null)
+  button.fire('click')
+  await h.settle()
+  assert.equal(button.getAttribute('aria-pressed'), 'false')
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), null, '关闭后不留模式属性')
+  assert.equal(made.row.getAttribute('data-dsgb-recent'), null, '关闭后不留 recent 标记')
+  assert.equal(a.section.getAttribute('data-dsgb-recent-empty'), null)
+  assert.equal(modeMenuOf(h), null, '左键同时收起菜单')
+  h.api.stop()
+})
+
+test('卸载：摘掉模式属性、菜单与按钮，不留插件痕迹', async () => {
+  const h = await bootChrome({ chrome: true })
+  const button = headerButtonOf(h)
+  button.fire('contextmenu')
+  assert.notEqual(modeMenuOf(h), null)
+  h.window.__dsgbChromeTest.stop()
+  await h.settle()
+  assert.equal(modeMenuOf(h), null, '菜单要收掉')
+  assert.equal(headerButtonOf(h), null, '按钮要摘掉')
+  assert.equal(h.doc.documentElement.getAttribute('data-dsgb-mode'), null)
+  assert.equal(h.doc.querySelector('[data-dsgb-workspace-chrome="style"]'), null, '样式也要撤掉')
+})
+
